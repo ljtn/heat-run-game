@@ -1597,6 +1597,46 @@ export class World {
     b.door = door;
   }
 
+  // green gantry signs before every exit off the highways and expressways: an advance sign ~400 m out, a final one ~120 m
+  buildExitSigns() {
+    this.exitSigns = [];
+    const place = (x, z) => { // which named place an exit leads towards
+      if (this.inCityRect(x, z, 150)) return Math.hypot(x - CITY.cx, z - CITY.cz) < 400 ? 10 : x > CITY.x1 - 300 ? 11 : 0;
+      let best = 0, bd = 1e18;
+      const cands = [...this.villages.map((v, i) => [v.x, v.z, 1 + i]), ...PEAKS.map((P, i) => [P.x, P.z, 5 + i]), [LAKE.x, LAKE.z, 9], [CITY.cx, CITY.cz, 0]];
+      for (const [px, pz, k] of cands) { const d = Math.hypot(px - x, pz - z); if (d < bd) { bd = d; best = k; } }
+      return best;
+    };
+    const big = (e) => !e.ramp && (e.type === 'highway' || e.fwy);
+    for (const nd of this.nodes) {
+      if (nd.edges.length < 3) continue;
+      const es = nd.edges.map((id) => this.edges[id]);
+      const mains = es.filter(big), exits = es.filter((e) => !big(e));
+      if (mains.length < 1 || !exits.length) continue;
+      // where does the exit go: follow it to its far end
+      const ex = exits[0], far = this.nodes[ex.a === nd.id ? ex.b : ex.a], dest = place(far.x, far.z);
+      for (const e of mains) {
+        const P = e.a === nd.id ? e.pts.slice().reverse() : e.pts; // travelling toward the junction
+        for (const [dist, final] of [[400, false], [120, true]]) {
+          let acc = 0, i = P.length - 1;
+          while (i > 0 && acc < dist) { acc += Math.hypot(P[i].x - P[i - 1].x, P[i].z - P[i - 1].z); i--; }
+          if (acc < dist || i < 3) continue;
+          const p = P[i], q = P[i + 1], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, tx = (q.x - p.x) / L, tz = (q.z - p.z) / L;
+          if (this.tunnelAt(p.x, p.z, p.y + 1) !== null || this.exitSigns.some((g) => Math.hypot(g.x - p.x, g.z - p.z) < 60)) continue;
+          if (this.nodes.some((o) => o !== nd && o.edges.length > 2 && Math.hypot(o.x - p.x, o.z - p.z) < 40)) continue;
+          const g = { x: p.x, z: p.z, y: p.y, tx, tz, hw: e.halfW, dest, final, deck: !!(e.fwy || e.bridge[i]) };
+          const po = e.halfW + (g.deck ? 0.6 : 1.8);
+          if ([-1, 1].some((sd) => this.onRampPath(p.x - tz * po * sd, p.z + tx * po * sd, 3) || this.roadDistance(p.x - tz * po * sd, p.z + tx * po * sd) < 0.5)) continue; // not where a ramp merges
+          this.exitSigns.push(g);
+          for (const sd of [-1, 1]) { // the posts stand just off each edge of the road (on the deck parapet when elevated)
+            const o = e.halfW + (g.deck ? 0.6 : 1.8);
+            this.colliders.push({ type: 'box', x: p.x - tz * o * sd, z: p.z + tx * o * sd, hx: 0.3, hz: 0.3, c: 1, s: 0, top: p.y + 9.5, bottom: p.y - 0.6, tall: true });
+          }
+        }
+      }
+    }
+  }
+
   // tall roadside billboards along the country highways and roads, angled to face oncoming traffic
   buildBillboards() {
     const R = this.rand;
@@ -2734,6 +2774,7 @@ export class World {
     this.buildParklets();
     this.buildRoadsideParking();
     this.buildBillboards();
+    this.buildExitSigns();
     // guardrails on the drop side of the mountain roads (breakable: you can go over).
     // On the big mountain they have gaps: nothing between you and the chasm.
     for (const e of this.edges) {

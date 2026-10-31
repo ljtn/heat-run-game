@@ -788,6 +788,28 @@ export function buildAdSigns(world, scene, mats) {
     face(cx + nx * 0.37, y, cz + nz * 0.37, W, H, rot, Math.floor(R() * 12));
     for (const v of [-W * 0.3, 0, W * 0.3]) slab(cx + ca * v + nx * 0.9, y + H / 2 + 0.35, cz - sa * v + nz * 0.9, 0.4, 0.1, 0.9, rot, 0x2a2b2d); // flood lamps
   }
+  // highway exit gantries: posts each side, a truss across, the green sign hung over the lanes heading for the exit
+  const ex = { p: [], u: [], i: [] };
+  for (const g of world.exitSigns || []) {
+    const rot = Math.atan2(-g.tx, -g.tz), rx = -g.tz, rz = g.tx, o = g.hw + (g.deck ? 0.6 : 1.8);
+    for (const sd of [-1, 1]) slab(g.x + rx * o * sd, g.y + 4.6, g.z + rz * o * sd, 0.35, 9.6, 0.35, rot, 0x8a8e94);
+    for (const dy of [8.1, 9.1]) slab(g.x, g.y + dy, g.z, 2 * o + 0.4, 0.18, 0.18, rot, 0x8a8e94);
+    const W = 6.4, H = 3.2, cx = g.x + rx * g.hw * 0.5, cz = g.z + rz * g.hw * 0.5, cy = g.y + 8.6 - H / 2 + 0.3;
+    slab(cx - g.tx * 0.12, cy, cz - g.tz * 0.12, W + 0.2, H + 0.2, 0.12, rot, 0x4a4e54); // back plate
+    const k = g.dest * 2 + (g.final ? 1 : 0), u0 = (k % 4) / 4, u1 = u0 + 0.25, v1 = 1 - Math.floor(k / 4) / 6, v0 = v1 - 1 / 6;
+    const ca = Math.cos(rot), sa = Math.sin(rot), fx = cx - g.tx * 0.2, fz = cz - g.tz * 0.2, base = ex.p.length / 3;
+    ex.p.push(fx - ca * W / 2, cy - H / 2, fz + sa * W / 2, fx + ca * W / 2, cy - H / 2, fz - sa * W / 2, fx + ca * W / 2, cy + H / 2, fz - sa * W / 2, fx - ca * W / 2, cy + H / 2, fz + sa * W / 2);
+    ex.u.push(u0, v0, u1, v0, u1, v1, u0, v1);
+    ex.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  if (ex.p.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(ex.p, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(ex.u, 2));
+    g.setIndex(ex.i); g.computeVertexNormals();
+    const t = TX.exitSignAtlas();
+    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: t, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.12, roughness: 0.45 })));
+  }
   if (metal.length) { const m = new THREE.Mesh(mergeGeometries(metal), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.4 })); m.castShadow = m.receiveShadow = true; scene.add(m); }
   if (ad.p.length) {
     const g = new THREE.BufferGeometry();

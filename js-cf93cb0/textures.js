@@ -585,3 +585,25 @@ export function streetSignAtlas() {
   });
   return tex(c, { repeat: false });
 }
+
+// highway exit signs, 4 x 6 cells of 512 x 256: for each of 12 destinations an advance sign (EXIT 400 m) and a final one (EXIT ↗)
+export const EXIT_DESTS = ['MERIDIAN CITY', 'ASHFORD', 'LAKEVIEW', 'HARLOW', 'MILLBROOK', 'MOUNT MERIDIAN', 'NORTH HORN', 'GREY KNUCKLE', 'IRON CROWN', 'LAKE CORVIN', 'DOWNTOWN', 'RIVERSIDE'];
+export function exitSignAtlas() {
+  const [c, ctx] = canvas(2048, 1536);
+  EXIT_DESTS.forEach((name, d) => [false, true].forEach((final, f) => {
+    const k = d * 2 + f, x0 = (k % 4) * 512, y0 = Math.floor(k / 4) * 256;
+    ctx.fillStyle = '#0e6a3a'; ctx.fillRect(x0, y0, 512, 256);
+    ctx.strokeStyle = '#f4f4f0'; ctx.lineWidth = 7; ctx.beginPath(); ctx.roundRect(x0 + 10, y0 + 10, 492, 236, 18); ctx.stroke();
+    // the yellow EXIT tab
+    ctx.fillStyle = '#f2c419'; ctx.fillRect(x0 + 340, y0 + 24, 150, 50);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 40px "Arial Narrow", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('EXIT', x0 + 415, y0 + 51);
+    ctx.fillStyle = '#f4f4f0'; ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.min(64, 760 / name.length)}px "Arial Narrow", Arial, sans-serif`;
+    ctx.fillText(name, x0 + 34, y0 + 130);
+    ctx.font = 'bold 46px "Arial Narrow", Arial, sans-serif';
+    if (final) { ctx.font = 'bold 96px Arial, sans-serif'; ctx.textAlign = 'right'; ctx.fillText('↗', x0 + 480, y0 + 196); }
+    else ctx.fillText('400 m', x0 + 34, y0 + 200);
+  }));
+  return tex(c, { repeat: false });
+}
