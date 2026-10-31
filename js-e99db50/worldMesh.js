@@ -1558,7 +1558,7 @@ function growBroadleaf(S, hiDetail) {
         const u = r() * 2 - 1, ph = r() * 6.283, sq = Math.sqrt(1 - u * u), d = s * (0.92 + r() * 0.2);
         const px = x + sq * Math.cos(ph) * d, py = y + u * d * (S.squash || 0.85), pz = z + sq * Math.sin(ph) * d;
         if (py < y - s * 0.6) continue; // (the underside is hidden anyway)
-        const g = new THREE.OctahedronGeometry(0.2 + r() * 0.16, 0).toNonIndexed();
+        const g = new THREE.OctahedronGeometry(0.2 + r() * 0.16, 0); // (already non-indexed)
         g.rotateY(r() * 3); g.rotateX(r() * 3); g.translate(px, py, pz);
         const t = clamp((py - y0) / (y1 - y0), 0, 1);
         c.copy(A).lerp(B, clamp(t * 0.75 + 0.3 + (r() - 0.5) * 0.3, 0, 1)).multiplyScalar(0.9 + r() * 0.25);
@@ -1713,36 +1713,117 @@ function buildLamps(world, group, mats) {
 
 function buildTrafficLights(world, group, mats) {
   const list = world.trafficLights;
-  const n = list.length;
+  const n = list.length, HEADS = 3;
   const poleG = mergeGeometries([
     new THREE.CylinderGeometry(0.1, 0.13, 5.6, 6).translate(0, 2.8, 0),
     new THREE.BoxGeometry(0.1, 0.1, 5.0).translate(0, 5.5, 2.5),
     new THREE.BoxGeometry(0.45, 1.3, 0.4).translate(0, 4.9, 4.6),
   ]);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.5, metalness: 0.6 });
+  // on the wide avenues the pole is a tall mast whose arm arches right across the street, signal heads hanging off it
+  const arch = (S) => new THREE.CatmullRomCurve3([[0, 6.2, 0], [0, 7.3, S * 0.22], [0, 7.75, S * 0.5], [0, 7.55, S * 0.8], [0, 7.3, S]].map((p) => new THREE.Vector3(...p)));
+  const armHeads = [0.45, 0.7, 0.93];
+  const archGeo = (S) => {
+    const C = arch(S), parts = [new THREE.CylinderGeometry(0.15, 0.2, 6.4, 8).translate(0, 3.2, 0), new THREE.TubeGeometry(C, 28, 0.11, 6)];
+    parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 4.6, 0), new THREE.Vector3(0, 5.6, S * 0.08), new THREE.Vector3(0, 6.9, S * 0.16)]), 8, 0.05, 5)); // brace
+    for (const f of armHeads) {
+      const p = C.getPoint(f);
+      parts.push(new THREE.BoxGeometry(0.06, 0.5, 0.06).translate(0, p.y - 0.25, p.z), new THREE.BoxGeometry(0.45, 1.3, 0.4).translate(0, p.y - 1.15, p.z), new THREE.BoxGeometry(0.75, 1.6, 0.04).translate(0, p.y - 1.15, p.z + 0.2));
+    }
+    return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+  };
+  const wide = (tl) => { const nd = world.nodes[tl.node]; return (tl.sx < 0 ? nd.hx : nd.hz) >= 9; };
+  const spanOf = (tl) => { const nd = world.nodes[tl.node]; return 2 * (tl.sx < 0 ? nd.hx : nd.hz) + 0.6; };
   const poles = new THREE.InstancedMesh(poleG, poleMat, n);
+  const archMeshes = {};
+  for (const tl of list) if (wide(tl)) { const S = spanOf(tl).toFixed(1); archMeshes[S] = archMeshes[S] || { S: +S, list: [] }; archMeshes[S].list.push(tl); }
+  for (const k in archMeshes) { const A = archMeshes[k]; A.im = new THREE.InstancedMesh(archGeo(A.S), poleMat, A.list.length); A.im.castShadow = true; group.add(A.im); }
   const lampG = new THREE.SphereGeometry(0.16, 8, 6);
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-  const bulbs = [0, 1, 2].map(() => new THREE.InstancedMesh(lampG, lampMat, n * 2));
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), yA = new THREE.Vector3(0, 1, 0);
+  const bulbs = [0, 1, 2].map(() => new THREE.InstancedMesh(lampG, lampMat, n * 2 * HEADS));
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), yA = new THREE.Vector3(0, 1, 0), zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const signs = { p: [], u: [], i: [] }, R = mulberry32(99);
+  const signQuad = (cx, cy, cz, w, h, rot, cell) => { // double-sided panel; local x across the street (along the arm)
+    const fx = Math.sin(rot), fz = Math.cos(rot), u0 = (cell % 2) / 2, u1 = u0 + 0.5, v1 = 1 - Math.floor(cell / 2) / 4, v0 = v1 - 0.25;
+    for (const d of [1, -1]) {
+      const base = signs.p.length / 3, nx = -fz * d, nz = fx * d; // panel faces along the road (perpendicular to the arm)
+      const ax = fx * w / 2 * d, az = fz * w / 2 * d;
+      signs.p.push(cx - ax + nx * 0.04, cy - h / 2, cz - az + nz * 0.04, cx + ax + nx * 0.04, cy - h / 2, cz + az + nz * 0.04, cx + ax + nx * 0.04, cy + h / 2, cz + az + nz * 0.04, cx - ax + nx * 0.04, cy + h / 2, cz - az + nz * 0.04);
+      signs.u.push(u0, v0, u1, v0, u1, v1, u0, v1);
+      signs.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  };
   list.forEach((tl, i) => {
     // NW pole (sx=-1) shows the NS axis, its arm points +x. SE pole shows EW, arm points -z.
     tl.axis = tl.sx < 0 ? 0 : 1;
     tl.rot = tl.sx < 0 ? Math.PI / 2 : Math.PI;
     q.setFromAxisAngle(yA, tl.rot);
     m4.compose(v.set(tl.x, tl.y, tl.z), q, one);
-    poles.setMatrixAt(i, m4);
-    const fx = Math.sin(tl.rot), fz = Math.cos(tl.rot);
-    // perpendicular (the head faces traffic on the arm's road)
-    const px = fz, pz = -fx;
-    for (let k = 0; k < 3; k++) {
-      for (let side = 0; side < 2; side++) {
+    const fx = Math.sin(tl.rot), fz = Math.cos(tl.rot), px = fz, pz = -fx;
+    if (wide(tl)) {
+      const A = archMeshes[spanOf(tl).toFixed(1)];
+      tl.arch = A; tl.ai = A.list.indexOf(tl);
+      A.im.setMatrixAt(tl.ai, m4);
+      poles.setMatrixAt(i, zero);
+      const C = arch(A.S);
+      armHeads.forEach((f, h) => {
+        const p = C.getPoint(f);
+        for (let k = 0; k < 3; k++) for (let side = 0; side < 2; side++) {
+          const s = side ? 1 : -1;
+          m4.makeTranslation(tl.x + fx * p.z + px * 0.22 * s, tl.y + p.y - 0.75 - k * 0.4, tl.z + fz * p.z + pz * 0.22 * s);
+          bulbs[k].setMatrixAt((i * HEADS + h) * 2 + side, m4);
+        }
+      });
+      // a green guide sign or a street-name blade hung off the arm near the pole
+      tl.s0 = signs.p.length / 3;
+      const big = R() < 0.6, f = big ? 0.22 : 0.17, p = C.getPoint(f), w = big ? 3.6 : 2.2, h = w / 4;
+      signQuad(tl.x + fx * p.z, tl.y + p.y - 0.1 - h / 2, tl.z + fz * p.z, w, h, tl.rot, big ? Math.floor(R() * 4) : 4 + Math.floor(R() * 4));
+      tl.s1 = signs.p.length / 3;
+    } else {
+      poles.setMatrixAt(i, m4);
+      for (let k = 0; k < 3; k++) for (let h = 0; h < HEADS; h++) for (let side = 0; side < 2; side++) {
         const s = side ? 1 : -1;
+        if (h) { bulbs[k].setMatrixAt((i * HEADS + h) * 2 + side, zero); continue; }
         m4.makeTranslation(tl.x + fx * 4.6 + px * 0.22 * s, tl.y + 5.3 - k * 0.4, tl.z + fz * 4.6 + pz * 0.22 * s);
-        bulbs[k].setMatrixAt(i * 2 + side, m4);
+        bulbs[k].setMatrixAt((i * HEADS + h) * 2 + side, m4);
       }
     }
   });
+  // sign gantries arching over the avenues between junctions
+  const gantries = [];
+  for (const e of world.edges) {
+    if (e.type !== 'avenue' || R() > 0.45) continue;
+    const A = world.nodes[e.a], B = world.nodes[e.b], L = Math.hypot(B.x - A.x, B.z - A.z);
+    if (L < 60) continue;
+    const tx = (B.x - A.x) / L, tz = (B.z - A.z) / L, mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
+    const hw = e.halfW + 1.3, bx = mx - tz * hw, bz = mz + tx * hw;
+    if (world.excluded(bx, bz, 1) || world.bridgeAt(mx, mz, 1e9) !== null) continue;
+    const rot = Math.atan2(tz, -tx), S = 2 * hw; // the arm reaches from this post across the avenue to the far one
+    const ga = { x: bx, z: bz, y: CITY.at(bx, bz) + CITY.curb, rot, S };
+    gantries.push(ga);
+    for (const d of [0, S]) { const c = { type: 'circle', x: bx + Math.sin(rot) * d, z: bz + Math.cos(rot) * d, r: 0.25, top: ga.y + 8, tall: true }; world.colliders.push(c); world.insertCollider(c); }
+  }
+  if (gantries.length) {
+    const parts = [];
+    for (const g of gantries) {
+      const C = arch(g.S), fx = Math.sin(g.rot), fz = Math.cos(g.rot);
+      const geo = mergeGeometries([new THREE.CylinderGeometry(0.17, 0.22, 6.4, 8).translate(0, 3.2, 0), new THREE.TubeGeometry(C, 28, 0.13, 6), new THREE.CylinderGeometry(0.17, 0.22, 7.3, 8).translate(0, 3.65, g.S)].map((x) => (x.index ? x.toNonIndexed() : x)));
+      geo.rotateY(g.rot); geo.translate(g.x, g.y, g.z);
+      parts.push(geo);
+      for (const f of [0.3, 0.7]) { const p = C.getPoint(f); signQuad(g.x + fx * p.z, g.y + p.y - 0.15 - 0.55, g.z + fz * p.z, 4.4, 1.1, g.rot, Math.floor(R() * 4)); }
+    }
+    const gm = new THREE.Mesh(mergeGeometries(parts), poleMat); gm.castShadow = true; group.add(gm);
+  }
+  let signGeo = null;
+  if (signs.p.length) {
+    signGeo = new THREE.BufferGeometry();
+    signGeo.setAttribute('position', new THREE.Float32BufferAttribute(signs.p, 3));
+    signGeo.setAttribute('uv', new THREE.Float32BufferAttribute(signs.u, 2));
+    signGeo.setIndex(signs.i); signGeo.computeVertexNormals();
+    const t = TX.streetSignAtlas();
+    const sm = new THREE.Mesh(signGeo, new THREE.MeshStandardMaterial({ map: t, roughness: 0.5, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.08, side: THREE.DoubleSide }));
+    group.add(sm);
+  }
   poles.castShadow = true;
   group.add(poles, ...bulbs);
   const cR = new THREE.Color(3, 0.15, 0.08), cY = new THREE.Color(3, 1.6, 0.1), cG = new THREE.Color(0.2, 3, 0.6), off = new THREE.Color(0.06, 0.06, 0.06);
@@ -1752,10 +1833,10 @@ function buildTrafficLights(world, group, mats) {
         const nd = world.nodes[tl.node];
         const s = tl.broken ? 'X' : world.lightState(nd, tl.axis, time);
         const blink = tl.broken && Math.floor(time * 2) % 2 === 0;
-        for (let side = 0; side < 2; side++) {
-          bulbs[0].setColorAt(i * 2 + side, s === 'R' ? cR : off);
-          bulbs[1].setColorAt(i * 2 + side, s === 'Y' || blink ? cY : off);
-          bulbs[2].setColorAt(i * 2 + side, s === 'G' ? cG : off);
+        for (let j = i * HEADS * 2; j < (i + 1) * HEADS * 2; j++) {
+          bulbs[0].setColorAt(j, s === 'R' ? cR : off);
+          bulbs[1].setColorAt(j, s === 'Y' || blink ? cY : off);
+          bulbs[2].setColorAt(j, s === 'G' ? cG : off);
         }
       });
       for (const b of bulbs) b.instanceColor.needsUpdate = true;
@@ -1765,10 +1846,9 @@ function buildTrafficLights(world, group, mats) {
       const i = list.indexOf(tl);
       q.setFromEuler(new THREE.Euler(1.2, tl.rot, 0.3, 'YXZ'));
       m4.compose(v.set(tl.x, tl.y, tl.z), q, one);
-      poles.setMatrixAt(i, m4);
-      poles.instanceMatrix.needsUpdate = true;
-      m4.makeScale(0, 0, 0);
-      for (const b of bulbs) { b.setMatrixAt(i * 2, m4); b.setMatrixAt(i * 2 + 1, m4); b.instanceMatrix.needsUpdate = true; }
+      if (tl.arch) { tl.arch.im.setMatrixAt(tl.ai, m4); tl.arch.im.instanceMatrix.needsUpdate = true; } else { poles.setMatrixAt(i, m4); poles.instanceMatrix.needsUpdate = true; }
+      for (const b of bulbs) { for (let j = i * HEADS * 2; j < (i + 1) * HEADS * 2; j++) b.setMatrixAt(j, zero); b.instanceMatrix.needsUpdate = true; }
+      if (signGeo && tl.s1 > tl.s0) { const P = signGeo.attributes.position; for (let k = tl.s0; k < tl.s1; k++) P.setXYZ(k, 0, -100, 0); P.needsUpdate = true; } // the sign comes down with it
     },
   };
 }

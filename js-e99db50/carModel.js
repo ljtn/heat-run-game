@@ -562,9 +562,10 @@ export function deformCar(car, px, py, pz, dx, dy, dz, amount, opts = {}) {
       const k = amount * f * f;
       // crumple with a little random wrinkle so it doesn't look like a smooth push
       const wr = 1 + (Math.sin(a[i] * 17.3 + a[i + 2] * 11.1) * 0.35);
-      // panels above the impact buckle upward (hood/boot lids folding), lower ones get pushed in and down
-      const up = a[i + 1] > py ? buckle * k * (0.6 + 0.4 * Math.sin(a[i] * 9.1 + a[i + 2] * 7.3)) : -k * 0.15 * f;
-      let nx = a[i] + dx * k * wr, ny = a[i + 1] + dy * k * 0.5 + up, nz = a[i + 2] + dz * k * wr;
+      // panels above the impact buckle upward (hood/boot lids folding), lower ones are only pushed in:
+      // never down, or the sills and bumpers sag over the wheels and the car looks sunk into the road
+      const up = a[i + 1] > py ? buckle * k * (0.6 + 0.4 * Math.sin(a[i] * 9.1 + a[i + 2] * 7.3)) : 0;
+      let nx = a[i] + dx * k * wr, ny = Math.max(o[i + 1] - 0.03, a[i + 1] + dy * k * 0.5 + up), nz = a[i + 2] + dz * k * wr;
       const ox = nx - o[i], oy = ny - o[i + 1], oz = nz - o[i + 2];
       const ol = Math.hypot(ox, oy, oz);
       if (ol > maxOff) { nx = o[i] + (ox / ol) * maxOff; ny = o[i + 1] + (oy / ol) * maxOff; nz = o[i + 2] + (oz / ol) * maxOff; }

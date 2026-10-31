@@ -1597,6 +1597,32 @@ export class World {
     b.door = door;
   }
 
+  // tall roadside billboards along the country highways and roads, angled to face oncoming traffic
+  buildBillboards() {
+    const R = this.rand;
+    this.billboards = [];
+    for (const e of this.edges) {
+      if (e.city || e.elev || e.peak || !(e.type === 'highway' || e.type === 'road')) continue;
+      for (let i = 25; i < e.pts.length - 25; i += 28 + Math.floor(R() * 30)) {
+        if (R() > 0.4 || e.bridge[i] || (e.tunnel && e.tunnel[i])) continue;
+        const p = e.pts[i], q = e.pts[i + 2], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, tx = (q.x - p.x) / L, tz = (q.z - p.z) / L;
+        const side = R() < 0.5 ? -1 : 1, off = e.halfW + 7 + R() * 5;
+        const x = p.x - tz * off * side, z = p.z + tx * off * side;
+        if (this.inCityRect(x, z, 40) || this.excluded(x, z, 8) || this.houseOverlaps(x, z, 12) || this.sampleGrid(this.waterDist, x, z) < 10 || this.roadDistance(x, z) < 5) continue;
+        if (this.billboards.some((b) => Math.hypot(b.x - x, b.z - z) < 160)) continue;
+        // the board runs across the road's direction, turned a little toward the traffic
+        const ang = Math.atan2(-tz, tx) + Math.PI / 2 + side * 0.35, ca = Math.cos(ang), sa = Math.sin(ang);
+        const ys = [-4, 4].map((u) => this.terrainHeight(x + ca * u, z - sa * u));
+        const y = Math.min(...ys);
+        if (Math.max(...ys) - y > 3) continue;
+        const bb = { x, z, y, rot: ang, ad: Math.floor(R() * 12), ad2: Math.floor(R() * 12), h: 7 + R() * 3, w: 12 };
+        this.billboards.push(bb);
+        for (const u of [-3.6, 3.6]) this.colliders.push({ type: 'circle', x: x + ca * u, z: z - sa * u, r: 0.4, top: y + bb.h + 6, tall: true });
+        this.excl.push({ x0: x - 7, x1: x + 7, z0: z - 7, z1: z + 7 });
+      }
+    }
+  }
+
   // parking bays: lay-bys cut 2.4 m into the sidewalk, so cars parked along the street sit out of the traffic lane
   planParkingBays() {
     const R = this.rand, D = 2.4, SL = 6.2;
@@ -2465,7 +2491,7 @@ export class World {
   addPropRaw(kind, x, z, y, rot) {
     const PROP = {
       cone: { r: 0.3, slow: 0.997 }, barrier: { r: 0.8, slow: 0.985 }, chair: { r: 0.35, slow: 0.99 },
-      table: { r: 0.55, slow: 0.98 }, stall: { r: 1.3, slow: 0.9 }, crate: { r: 0.5, slow: 0.985 },
+      table: { r: 0.55, slow: 0.98 }, table2: { r: 0.55, slow: 0.98 }, table3: { r: 0.55, slow: 0.98 }, table4: { r: 0.55, slow: 0.98 }, stall: { r: 1.3, slow: 0.9 }, crate: { r: 0.5, slow: 0.985 },
       bin: { r: 0.35, slow: 0.975 }, news: { r: 0.32, slow: 0.98 }, hydrant: { r: 0.22, slow: 0.93 },
       planter: { r: 0.6, slow: 0.95 }, dumpster: { r: 1.0, slow: 0.82 }, window: { r: 0, slow: 0.93 },
       boxes: { r: 0.6, slow: 0.995 }, bags: { r: 0.55, slow: 0.99 },
@@ -2483,6 +2509,7 @@ export class World {
   }
 
   buildProps() {
+    this.terraces = [];
     const R = this.rand;
     this.props = {};
     let y = CITY.y + CITY.curb;
@@ -2502,16 +2529,29 @@ export class World {
         const at = (t, inset) => [sd.ax + tx * t - sd.nx * inset, sd.az + tz * t - sd.nz * inset];
         const faceRot = Math.atan2(sd.nx, sd.nz);
         if (blk.kind === 'build' || blk.kind === 'plaza') {
-          // café terrace
+          // café terrace: a wooden deck, a screen along the street side (gap to walk in), parasol tables of one design
           if (R() < 0.4) {
-            const t0 = 12 + R() * (L - 30);
-            for (let k = 0; k < 2 + Math.floor(R() * 2); k++) {
-              const [cx, cz] = at(t0 + k * 4.5, 2.4);
-              this.addProp('table', cx, cz, y, R() * 6);
-              for (let c = 0; c < 3; c++) {
-                const a = (c / 3) * Math.PI * 2 + R();
-                this.addProp('chair', cx + Math.cos(a) * 0.95, cz + Math.sin(a) * 0.95, y, -a + Math.PI / 2);
+            const t0 = 12 + R() * (L - 30), n = 2 + Math.floor(R() * 2), len = (n - 1) * 4.5 + 4.4;
+            const clear = [0, 0.5, 1].every((f) => { const [x, z] = at(t0 - 2.2 + len * f, 2.2); return !this.excluded(x, z, 1); });
+            if (clear) {
+              const kind = ['table', 'table2', 'table3', 'table4'][Math.floor(R() * 4)];
+              const [dx, dz] = at(t0 - 2.2 + len / 2, 2.25);
+              this.terraces.push({ x: dx, z: dz, y, len, depth: 3.3, rot: faceRot, wood: Math.floor(R() * 3) });
+              for (let k = 0; k < n; k++) {
+                const [cx, cz] = at(t0 + k * 4.5, 2.4);
+                this.addProp(kind, cx, cz, y, R() * 6);
+                for (let c = 0; c < 3; c++) {
+                  const a = (c / 3) * Math.PI * 2 + R();
+                  this.addProp('chair', cx + Math.cos(a) * 0.95, cz + Math.sin(a) * 0.95, y, -a + Math.PI / 2);
+                }
               }
+              const gap = Math.floor(R() * Math.max(1, Math.floor(len / 2.45)));
+              for (let k = 0; k * 2.45 + 2.4 <= len + 0.1; k++) {
+                if (k === gap) continue;
+                const [sx, sz] = at(t0 - 2.2 + 1.22 + k * 2.45, 0.55);
+                this.addPropBox('screen', sx, sz, y, faceRot, 1.2, 0.16);
+              }
+              if (R() < 0.6) { const [sx, sz] = at(t0 - 2.2 + (R() < 0.5 ? 0 : len), 2.2); this.addPropBox('screen', sx, sz, y, faceRot + Math.PI / 2, 1.2, 0.16); } // and one closed end
             }
           }
           // fruit market
@@ -2693,6 +2733,7 @@ export class World {
     this.buildPaddocks();
     this.buildParklets();
     this.buildRoadsideParking();
+    this.buildBillboards();
     // guardrails on the drop side of the mountain roads (breakable: you can go over).
     // On the big mountain they have gaps: nothing between you and the chasm.
     for (const e of this.edges) {

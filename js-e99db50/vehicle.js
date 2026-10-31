@@ -131,6 +131,7 @@ export class Vehicle {
     this.input = { throttle: 0, brake: 0, steer: 0, handbrake: 0 };
     this.steerAngle = 0;
     this.gear = 1;
+    this.autoReverse = false;
     this.rpm = spec.idle;
     this.shiftT = 0;
     this.shiftHold = 0;
@@ -226,7 +227,8 @@ export class Vehicle {
       if (inp.throttle > 0.1 && this.speed > -1.0) { this.gear = 1; }
       else { thr = inp.brake; brk = inp.throttle; }
     } else {
-      if (this.speed < 0.8 && inp.brake > 0.1 && inp.throttle < 0.1) {
+      // (holding the brake at a standstill selects reverse: the player's controls only; AI cars pick their own gear)
+      if (this.autoReverse && this.speed < 0.8 && inp.brake > 0.1 && inp.throttle < 0.1) {
         this.revTimer += dt;
         if (this.revTimer > 0.22) { this.gear = -1; thr = inp.brake; brk = 0; }
       } else this.revTimer = 0;

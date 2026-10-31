@@ -511,3 +511,77 @@ export function graffitiAtlas() {
   const t = tex(c, { repeat: false });
   return t;
 }
+
+// twelve billboard ads in a 4 x 3 atlas (each 512 x 256): bold colours, a drawn product, a name and a tagline
+export const AD_COUNT = 12;
+export function adAtlas() {
+  const CW = 512, CH = 256;
+  const [c, ctx] = canvas(CW * 4, CH * 3);
+  const ads = [
+    ['FIZZ COLA', 'TASTE THE RUSH', '#c8322a', '#7a1010', '#fff3d8', 'bottle'],
+    ['ACE MOTOR OIL', 'KEEPS YOU MOVING', '#1f4f9a', '#0c2550', '#ffd23c', 'can'],
+    ['SUNNY TV', 'COLOUR FOR EVERYONE', '#f0c419', '#d0801a', '#1a1a1a', 'tv'],
+    ['LUCKY RADIO', '101.7 FM ALL NIGHT', '#2e7d4a', '#123d22', '#ffffff', 'note'],
+    ['HOTEL METRO', 'ROOMS FROM $19', '#3a2a5a', '#160c2a', '#ff9ad8', 'star'],
+    ['BIG BOB\'S', 'BURGERS & SHAKES', '#ff7a2a', '#b83a10', '#fff8e0', 'burger'],
+    ['VELOCE', 'THE NEW V8 IS HERE', '#16181c', '#3a3e46', '#ff3a30', 'car'],
+    ['SURF CITY', 'FLY THERE TODAY', '#30b8e0', '#0a5a8a', '#ffffff', 'plane'],
+    ['MINT FRESH', 'SMILE WIDER', '#e8f6ee', '#9adcc0', '#106040', 'tooth'],
+    ['GOLDEN BREW', 'COLD. GOLD. GOOD.', '#e8a020', '#8a4a08', '#2a1408', 'bottle'],
+    ['ROCKET BANK', 'LOANS IN 5 MINUTES', '#5a2ad0', '#24086a', '#ffe23a', 'rocket'],
+    ['PIZZA PALACE', 'HOT IN 30 OR FREE', '#2a8a3a', '#0e4a18', '#fff3d8', 'pizza'],
+  ];
+  ads.forEach(([name, tag, c0, c1, fg, icon], k) => {
+    const x0 = (k % 4) * CW, y0 = Math.floor(k / 4) * CH;
+    const gr = ctx.createLinearGradient(x0, y0, x0 + CW, y0 + CH); gr.addColorStop(0, c0); gr.addColorStop(1, c1);
+    ctx.fillStyle = gr; ctx.fillRect(x0, y0, CW, CH);
+    // sunburst stripes behind the product
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, CW, CH); ctx.clip();
+    ctx.translate(x0 + 400, y0 + 130); ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    for (let a = 0; a < 12; a++) { ctx.rotate(Math.PI / 6); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(400, -40); ctx.lineTo(400, 40); ctx.fill(); }
+    ctx.restore();
+    // the product, drawn simply on the right
+    ctx.save(); ctx.translate(x0 + 400, y0 + 135); ctx.fillStyle = fg; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 5;
+    const sh = (f) => { ctx.beginPath(); f(); ctx.fill(); ctx.stroke(); };
+    if (icon === 'bottle') { sh(() => { ctx.moveTo(-12, -95); ctx.lineTo(12, -95); ctx.lineTo(14, -50); ctx.quadraticCurveTo(36, -30, 34, 0); ctx.lineTo(34, 85); ctx.lineTo(-34, 85); ctx.lineTo(-34, 0); ctx.quadraticCurveTo(-36, -30, -14, -50); ctx.closePath(); }); ctx.fillStyle = c0; ctx.fillRect(-34, 0, 68, 34); }
+    else if (icon === 'can') { sh(() => ctx.roundRect(-38, -70, 76, 150, 10)); ctx.fillStyle = c0; ctx.fillRect(-38, -20, 76, 40); }
+    else if (icon === 'tv') { sh(() => ctx.roundRect(-70, -60, 140, 105, 14)); ctx.fillStyle = '#5ad0ff'; ctx.fillRect(-56, -48, 112, 80); ctx.strokeStyle = fg; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-25, -60); ctx.lineTo(-45, -95); ctx.moveTo(25, -60); ctx.lineTo(45, -95); ctx.stroke(); }
+    else if (icon === 'note') { sh(() => { ctx.ellipse(-30, 50, 26, 19, -0.4, 0, 6.3); }); sh(() => { ctx.ellipse(40, 30, 26, 19, -0.4, 0, 6.3); }); ctx.fillRect(-10, -80, 10, 128); ctx.fillRect(60, -100, 10, 128); ctx.fillRect(-10, -100, 80, 22); }
+    else if (icon === 'star') sh(() => { for (let i = 0; i < 10; i++) { const r = i % 2 ? 40 : 95, a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); });
+    else if (icon === 'burger') { ctx.fillStyle = '#e8a040'; sh(() => ctx.ellipse(0, -30, 80, 45, 0, Math.PI, 0)); ctx.fillStyle = '#6a2a10'; sh(() => ctx.roundRect(-82, -28, 164, 30, 12)); ctx.fillStyle = '#7ac040'; ctx.fillRect(-86, 2, 172, 12); ctx.fillStyle = '#e8a040'; sh(() => ctx.roundRect(-80, 14, 160, 34, 14)); }
+    else if (icon === 'car') { sh(() => { ctx.moveTo(-100, 30); ctx.lineTo(-95, -5); ctx.lineTo(-40, -15); ctx.lineTo(-15, -50); ctx.lineTo(45, -50); ctx.lineTo(75, -12); ctx.lineTo(105, -5); ctx.lineTo(105, 30); ctx.closePath(); }); ctx.fillStyle = '#222'; for (const wx of [-55, 65]) sh(() => ctx.arc(wx, 32, 22, 0, 6.3)); }
+    else if (icon === 'plane') sh(() => { ctx.moveTo(-100, 0); ctx.lineTo(90, -12); ctx.quadraticCurveTo(110, 0, 90, 12); ctx.lineTo(-100, 8); ctx.closePath(); ctx.moveTo(10, -5); ctx.lineTo(-30, -80); ctx.lineTo(-10, -80); ctx.lineTo(40, -5); ctx.moveTo(10, 8); ctx.lineTo(-30, 80); ctx.lineTo(-10, 80); ctx.lineTo(40, 8); ctx.moveTo(-90, 0); ctx.lineTo(-105, -40); ctx.lineTo(-85, -40); ctx.lineTo(-70, 0); });
+    else if (icon === 'tooth') sh(() => { ctx.moveTo(-50, -60); ctx.quadraticCurveTo(0, -85, 50, -60); ctx.quadraticCurveTo(70, 0, 40, 80); ctx.quadraticCurveTo(20, 30, 0, 30); ctx.quadraticCurveTo(-20, 30, -40, 80); ctx.quadraticCurveTo(-70, 0, -50, -60); });
+    else if (icon === 'rocket') { sh(() => { ctx.moveTo(0, -100); ctx.quadraticCurveTo(40, -50, 30, 50); ctx.lineTo(-30, 50); ctx.quadraticCurveTo(-40, -50, 0, -100); }); ctx.fillStyle = '#ff7a2a'; sh(() => { ctx.moveTo(-20, 55); ctx.lineTo(0, 100); ctx.lineTo(20, 55); }); }
+    else if (icon === 'pizza') { ctx.fillStyle = '#f0c060'; sh(() => { ctx.moveTo(0, 90); ctx.lineTo(-80, -70); ctx.quadraticCurveTo(0, -105, 80, -70); ctx.closePath(); }); ctx.fillStyle = '#c8322a'; for (const [px, py] of [[-25, -40], [25, -45], [0, 10], [-5, -70]]) sh(() => ctx.arc(px, py, 13, 0, 6.3)); }
+    ctx.restore();
+    // name and tagline on the left
+    ctx.fillStyle = fg; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    const fs = Math.min(72, 560 / name.length);
+    ctx.font = `900 ${fs}px Impact, "Arial Black", sans-serif`;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillText(name, x0 + 28, y0 + 120 + 4);
+    ctx.fillStyle = fg; ctx.fillText(name, x0 + 24, y0 + 120);
+    ctx.font = `bold 26px "Arial Narrow", Arial, sans-serif`;
+    ctx.fillText(tag, x0 + 28, y0 + 168);
+    ctx.fillRect(x0 + 28, y0 + 186, 120, 6);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 8; ctx.strokeRect(x0 + 4, y0 + 4, CW - 8, CH - 8);
+  });
+  return tex(c, { repeat: false });
+}
+
+// overhead street signs, 2 x 4 cells of 512 x 128: green guide signs with arrows, then blue-on-white street names
+export function streetSignAtlas() {
+  const [c, ctx] = canvas(1024, 512);
+  const cells = [['DOWNTOWN', '↑'], ['EXPRESSWAY', '↗'], ['OLD TOWN', '←'], ['RIVERSIDE', '→'], ['MERIDIAN AVE'], ['5TH STREET'], ['CORVIN BLVD'], ['MARKET ST']];
+  cells.forEach(([t, arrow], k) => {
+    const x0 = (k % 2) * 512, y0 = Math.floor(k / 2) * 128, guide = k < 4;
+    ctx.fillStyle = guide ? '#0f6a3a' : '#1d4f9a'; ctx.fillRect(x0, y0, 512, 128);
+    ctx.strokeStyle = '#f4f4f0'; ctx.lineWidth = 6; ctx.strokeRect(x0 + 8, y0 + 8, 496, 112);
+    ctx.fillStyle = '#f4f4f0'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${guide ? 58 : 54}px "Arial Narrow", Arial, sans-serif`;
+    ctx.textAlign = guide ? 'left' : 'center';
+    ctx.fillText(t, guide ? x0 + 30 : x0 + 256, y0 + 66);
+    if (arrow) { ctx.font = 'bold 80px Arial, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(arrow, x0 + 490, y0 + 66); }
+  });
+  return tex(c, { repeat: false });
+}

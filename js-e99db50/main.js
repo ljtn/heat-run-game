@@ -22,7 +22,7 @@ import { HUD, fmtTime } from './hud.js';
 import { CameraRig, CAM_MODES } from './camera.js';
 import { Input } from './input.js';
 import { Atmosphere, PRESETS } from './sky.js';
-import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting } from './props.js';
+import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
 const GradeShader = {
@@ -104,6 +104,8 @@ class Game {
     this.props = new PropSystem(world, scene);
     buildShopSigns(world, scene, this.meshes.mats);
     buildAlleyDressing(world, scene, this.meshes.mats);
+    buildAdSigns(world, scene, this.meshes.mats);
+    buildTerraces(world, scene);
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -124,6 +126,7 @@ class Game {
 
     // player
     this.player = new Vehicle(world, 'muscle', this.paint, 'plain');
+    this.player.autoReverse = true;
     scene.add(this.player.root);
     this.cars.push(this.player);
     // two real headlight beams (left/right), wide and long; each goes dark if its lamps are smashed

@@ -524,8 +524,8 @@ export class TrafficManager {
     // passing just overhead and carry the car up onto it
     const ly = q[0].y !== undefined ? q[0].y : w.groundAt(x, z, v.pos.y + 1.5).h;
     // a route that disagrees with where the car actually is (e.g. a street under the expressway): out of sight, so retire it
-    if (Math.abs(ly + 0.11 + v.comH - v.pos.y) > 2.5) { d.kill = true; return; }
-    v.pos.set(x, ly + 0.06 + v.comH + 0.05, z);
+    if (Math.abs(ly + v.comH - v.pos.y) > 2.5) { d.kill = true; return; }
+    v.pos.set(x, ly + v.comH, z); // (where a parked car's body settles on its springs)
     v.forward(_fw);
     v.vel.copy(_fw).multiplyScalar(d.gSpeed);
     v.angVel.set(0, 0, 0);
