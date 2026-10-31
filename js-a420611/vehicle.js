@@ -611,7 +611,8 @@ export class Vehicle {
         p.pitch += ((env > 0 ? -0.15 : p.tp) - p.pitch) * Math.min(1, dt * 3);
         F.u.uHead.value[i].set(p.yaw, p.pitch);
         const shake = Math.sin(now * 13 + i * 1.7) * 0.35;
-        F.u.uArm.value[i].set(env * (2.2 + shake), env * (2.2 - shake)); // (positive: up and forward)
+        const e2 = this.type === 'bus' && i > 0 ? 0 : env; // on a bus only the driver throws their hands up
+        F.u.uArm.value[i].set(e2 * (1.45 + shake * 0.6), e2 * (1.45 - shake * 0.6)); // (up and forward to about face height, waving)
       });
     }
     // turn signals: 1.5 blinks a second on the side the driver is turning (or both, as hazards)

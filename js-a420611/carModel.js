@@ -131,7 +131,8 @@ const shared = {};
 function sharedMats() {
   if (shared.glass) return shared;
   // tinted but see-through, so you can see who's driving
-  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x0e141a, roughness: 0.06, metalness: 0.05, envMapIntensity: 0.8, transparent: true, opacity: 0.62, depthWrite: false });
+  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x0e141a, roughness: 0.06, metalness: 0.05, envMapIntensity: 0.8, transparent: true, opacity: 0.58, depthWrite: false });
+  shared.glassDark = new THREE.MeshPhysicalMaterial({ color: 0x06090c, roughness: 0.06, metalness: 0.05, envMapIntensity: 0.8, transparent: true, opacity: 0.8, depthWrite: false }); // side and rear: privacy tint
   shared.tire = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.93, side: THREE.DoubleSide });
   shared.whitewall = new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.7 });
   shared.steel = new THREE.MeshStandardMaterial({ color: 0x2a2b2d, roughness: 0.5, metalness: 0.6 });
@@ -383,7 +384,13 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     }
     cab = panes[0].mesh;
   } else {
-    cab = addMesh(model, cabGeo, cabMat, deformGeos);
+    // windscreen clear-ish, side and rear windows darker
+    const src = cabGeo.index ? cabGeo.toNonIndexed() : cabGeo, P = src.attributes.position, Nn = src.attributes.normal, UV = src.attributes.uv;
+    const front = [], rest = [];
+    for (let t = 0; t < P.count; t += 3) { let nz = 0, ny = 0, nx = 0; for (let q = t; q < t + 3; q++) { nx += Nn.getX(q); ny += Nn.getY(q); nz += Nn.getZ(q); } (nz / Math.hypot(nx, ny, nz) < -0.55 ? front : rest).push(t); }
+    const sub = (tris) => { const g = new THREE.BufferGeometry(), pos = [], nor = [], uv = []; for (const t of tris) for (let q = t; q < t + 3; q++) { pos.push(P.getX(q), P.getY(q), P.getZ(q)); nor.push(Nn.getX(q), Nn.getY(q), Nn.getZ(q)); if (UV) uv.push(UV.getX(q), UV.getY(q)); } g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); if (UV) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); return g; };
+    if (front.length) { const ws = addMesh(model, sub(front), M.glass, deformGeos); ws.receiveShadow = false; }
+    cab = addMesh(model, sub(rest), M.glassDark, deformGeos);
     cab.receiveShadow = false;
   }
   if (spec.style === 'bus') {
@@ -578,8 +585,9 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   // ---- interior: dash, steering wheel, a driver (and sometimes passengers) behind the glass ----
   if (st !== BODY_STYLES.bus || true) {
     const isBus = st === BODY_STYLES.bus;
-    const z0 = -L / 2 + st.cabStart * L, zSeat = isBus ? z0 + st.rakeF + 0.9 : z0 + (st.cabEnd - st.cabStart) * L * (st.cargo || st.bed ? 0.55 : 0.36) + st.rakeF * 0.5;
-    const dashZ = z0 + st.rakeF * 0.35 + 0.15;
+    const z0 = -L / 2 + st.cabStart * L, dashZ = z0 + st.rakeF * 0.35 + 0.15;
+    const roofEnd = -L / 2 + st.cabEnd * L - st.rakeR * 0.5 - 0.1; // past here the roof is too low for a head
+    const zSeat = isBus ? z0 + st.rakeF + 0.9 : Math.min(dashZ + 0.75, roofEnd - 0.15); // an arm's reach from the wheel
     addMesh(model, boxAt(W * 0.78, 0.14, 0.32, 0, st.belt - 0.02, dashZ), M.black, null, false);
     const drvX = st === BODY_STYLES.bus ? -W * 0.3 : -W * 0.22;
     addMesh(model, new THREE.TorusGeometry(0.17, 0.025, 6, 16).rotateX(-0.45).translate(drvX, st.belt + 0.08, dashZ + 0.32), M.black, null, false);
@@ -604,9 +612,8 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0).normalize()));
       folk.push(tint(g.translate(x0, y0, z0), hex, part, pv));
     };
-    const roofEnd = -L / 2 + st.cabEnd * L - st.rakeR - 0.2; // past here the roof slopes down: no room for a head
     const person = (x, z, driver = false) => {
-      if (z > roofEnd || z < z0 + st.rakeF * 0.6 || pIdx > 7) return;
+      if (z > roofEnd || z < z0 + st.rakeF * 0.45 || pIdx > 7) return;
       const skin = pick(skins), shirt = pick(shirts), hair = pick([0x1a1410, 0x3a2414, 0x6a4a28, 0xc8a060, 0x8a8a88, 0x2a1a10]);
       const hy = headY, neck = [x, hy - 0.12, z + 0.01];
       const H = (g, hex) => folk.push(tint(g, hex, 1, neck));
@@ -628,9 +635,12 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
       for (const sx of [-1, 1]) {
         folk.push(tint(new THREE.SphereGeometry(0.075, 8, 6).translate(x + sx * 0.18, hy - 0.22, z + 0.03), shirt)); // shoulder
         const part = sx < 0 ? 2 : 3, sh = [x + sx * 0.19, hy - 0.22, z + 0.03];
-        const ex = x + sx * 0.21, ey = hy - 0.47, ez = z - 0.06; // elbow
+        const ex = x + sx * 0.21, ey = hy - 0.46, ez = z - 0.08; // elbow, an upper arm's length below the shoulder
         limb(sh[0], sh[1], sh[2], ex, ey, ez, 0.045, shirt, part, sh);
-        const hx = driver ? drvX + sx * 0.15 : x + sx * 0.12, hY = driver ? st.belt + 0.08 : hy - 0.55, hz = driver ? dashZ + 0.3 : z - 0.3;
+        // forearm: toward the wheel (drivers) or the lap, fixed length
+        let tx = driver ? drvX + sx * 0.15 : x + sx * 0.12, ty = driver ? st.belt + 0.08 : hy - 0.55, tz = driver ? dashZ + 0.3 : z - 0.3;
+        const fl = Math.hypot(tx - ex, ty - ey, tz - ez) || 1, k = 0.28 / fl;
+        const hx = ex + (tx - ex) * k, hY = ey + (ty - ey) * k, hz = ez + (tz - ez) * k;
         limb(ex, ey, ez, hx, hY, hz, 0.038, skin, part, sh);
         folk.push(tint(new THREE.SphereGeometry(0.035, 6, 5).translate(hx, hY, hz), skin, part, sh)); // hand
       }
