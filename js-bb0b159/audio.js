@@ -311,6 +311,26 @@ export class AudioEngine {
     }
   }
 
+  // the compound's breach klaxon: a repeating rising whoop; vol 0 silences it
+  klaxon(vol) {
+    if (!this.enabled || !this.ctx) return;
+    const ctx = this.ctx;
+    if (vol > 0.01 && !this.klax) {
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), am = ctx.createGain(), amL = ctx.createOscillator(), amG = ctx.createGain(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'square'; o.frequency.value = 600;
+      lfo.type = 'sawtooth'; lfo.frequency.value = 1.25; lg.gain.value = 300; lfo.connect(lg).connect(o.frequency); // 300 -> 900 Hz sweeps
+      amL.type = 'square'; amL.frequency.value = 1.25; amG.gain.value = 0.5; am.gain.value = 0.5; amL.connect(amG).connect(am.gain); // a gap between whoops
+      f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+      g.gain.value = 0;
+      o.connect(f).connect(am).connect(g).connect(this.master);
+      o.start(); lfo.start(); amL.start();
+      this.klax = { o, lfo, amL, g };
+    }
+    if (this.klax) {
+      this.klax.g.gain.setTargetAtTime(this.muted ? 0 : vol * vol * 0.16, ctx.currentTime, 0.3);
+    }
+  }
+
   // the civil-defence siren: a slow rising and falling wail across town while the dinosaur is loose
   alarm(on) {
     if (!this.enabled || !this.ctx) return;
@@ -388,6 +408,26 @@ export class AudioEngine {
     const ng = ctx.createGain(); ng.gain.value = 0.5;
     n.connect(bp).connect(ng).connect(rattle); n.start(t0);
     fry.start(t0); fry.stop(t0 + D);
+  }
+
+  // the compound's breach klaxon: a repeating rising whoop; vol 0 silences it
+  klaxon(vol) {
+    if (!this.enabled || !this.ctx) return;
+    const ctx = this.ctx;
+    if (vol > 0.01 && !this.klax) {
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), am = ctx.createGain(), amL = ctx.createOscillator(), amG = ctx.createGain(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'square'; o.frequency.value = 600;
+      lfo.type = 'sawtooth'; lfo.frequency.value = 1.25; lg.gain.value = 300; lfo.connect(lg).connect(o.frequency); // 300 -> 900 Hz sweeps
+      amL.type = 'square'; amL.frequency.value = 1.25; amG.gain.value = 0.5; am.gain.value = 0.5; amL.connect(amG).connect(am.gain); // a gap between whoops
+      f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+      g.gain.value = 0;
+      o.connect(f).connect(am).connect(g).connect(this.master);
+      o.start(); lfo.start(); amL.start();
+      this.klax = { o, lfo, amL, g };
+    }
+    if (this.klax) {
+      this.klax.g.gain.setTargetAtTime(this.muted ? 0 : vol * vol * 0.16, ctx.currentTime, 0.3);
+    }
   }
 
   // the civil-defence siren: a slow rising and falling wail across town while the dinosaur is loose

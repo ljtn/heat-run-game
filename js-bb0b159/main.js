@@ -113,6 +113,8 @@ class Game {
     buildTerraces(world, scene);
     this.tram = new Tram(world, scene);
     this.park = new PrimevalValley(world, scene);
+    this.park.audio = this.audio;
+    this.park.game = this;
     this.rex = world.rex ? new TRex(scene, world, this) : null;
     this.raptors = world.rex && world.rex.pen ? world.rex.pen.starts.map((st, i) => new Raptor(scene, world, this, st, i)) : [];
     buildBunting(world, scene, this.meshes.mats);

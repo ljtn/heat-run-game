@@ -229,8 +229,14 @@ export class PrimevalValley {
     for (const sd of [-1, 1]) {
       const x = G.x + nx * G.half * sd, z = G.z + nz * G.half * sd;
       col(new THREE.BoxGeometry(3.2, 3, 3.2).rotateY(gr).translate(x, G.y + 1.5, z), 0x8a8478);
-      for (const o of [-0.7, 0.7]) col(new THREE.CylinderGeometry(0.55, 0.65, 13, 10).translate(x + G.tx * o, G.y + 9, z + G.tz * o), 0x6a4a2c);
-      col(new THREE.ConeGeometry(0.9, 1.4, 8).translate(x, G.y + 16.2, z), 0x4a3420);
+      const colParts = [], cc = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); colParts.push(g.index ? g.toNonIndexed() : g); };
+      for (const o of [-0.7, 0.7]) cc(new THREE.CylinderGeometry(0.55, 0.65, 13, 10).translate(G.tx * o, 6, G.tz * o), 0x6a4a2c);
+      cc(new THREE.ConeGeometry(0.9, 1.4, 8).translate(0, 13.2, 0), 0x4a3420);
+      // each column hinges at its stone footing (so it can topple outward)
+      const colG = new THREE.Group(); colG.position.set(x, G.y + 3, z);
+      const cm2 = new THREE.Mesh(mergeGeometries(colParts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })); cm2.castShadow = true; colG.add(cm2);
+      scene.add(colG);
+      (this.archCols || (this.archCols = [])).push({ g: colG, sd });
       col(new THREE.CylinderGeometry(0.18, 0.12, 1.3, 6).translate(x - G.tx * 1.1, G.y + 4.2, z - G.tz * 1.1), 0x3a2a1a); // torch
       // the gate leaf, swung open along the inside of the drive
       const leafW = G.half - 1.4, hx = x + G.tx * 1.6 - nx * sd * 1.4, hz = z + G.tz * 1.6 - nz * sd * 1.4;
@@ -238,7 +244,11 @@ export class PrimevalValley {
       leaf.rotateY(gr + sd * 0.12); leaf.translate(hx, G.y, hz);
       col(leaf, 0x5a3e24);
     }
-    col(new THREE.CylinderGeometry(0.7, 0.7, G.half * 2 + 5, 10).rotateZ(Math.PI / 2).rotateY(gr).translate(G.x, G.y + 14.6, G.z), 0x6a4a2c); // lintel log, across the drive
+    // the top of the arch: lintel log and name board together, so they fall as one
+    const top = (this.archTop = new THREE.Group()); top.position.set(G.x, G.y + 14.6, G.z); scene.add(top);
+    const lin = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, G.half * 2 + 5, 10).rotateZ(Math.PI / 2).rotateY(gr), new THREE.MeshStandardMaterial({ color: 0x6a4a2c, roughness: 0.85 })); // lintel log, across the drive
+    lin.castShadow = true; top.add(lin);
+    this.archAxis = new THREE.Vector3(G.tx, 0, G.tz); this.archN = new THREE.Vector3(nx, 0, nz);
     const fm = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
     fm.castShadow = fm.receiveShadow = true;
     scene.add(fm);
@@ -253,9 +263,14 @@ export class PrimevalValley {
       ctx.lineWidth = 3; ctx.strokeStyle = '#2a1408'; ctx.strokeText(PARK.name, w / 2, h / 2);
     });
     const board = new THREE.Mesh(new THREE.BoxGeometry(G.half * 2 + 2, (G.half * 2 + 2) * 0.31, 0.5), [0, 0, 0, 0, 1, 1].map((k) => (k ? new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.8 }) : new THREE.MeshStandardMaterial({ color: 0x3a2412 }))));
-    board.position.set(G.x, G.y + 12.2, G.z); board.rotation.y = gr;
+    board.position.set(0, -2.4, 0); board.rotation.y = gr;
     board.castShadow = true;
-    scene.add(board);
+    top.add(board);
+    // flashing amber warning beacons on both gate columns, with a glow to light up the arch at night
+    const gb = [];
+    for (const sd of [-1, 1]) for (const o of [-0.7, 0.7]) gb.push([G.x + nx * G.half * sd + G.tx * o, G.y + 15.6, G.z + nz * G.half * sd + G.tz * o]);
+    this.addBeacons(scene, gb, 'gate');
+    this.gateGlow = [-1, 1].map((sd) => { const l = new THREE.PointLight(0xffa020, 0, 30, 1.5); l.position.set(G.x + nx * G.half * sd, G.y + 15, G.z + nz * G.half * sd); scene.add(l); return l; });
     // torches burning on the columns
     this.torches = [-1, 1].map((sd) => {
       const s = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 8), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -361,7 +376,70 @@ export class PrimevalValley {
       ps.forEach((p, i) => { const rot = Math.atan2(-(p.z1 - p.z0), p.x1 - p.x0), mx = (p.x0 + p.x1) / 2, mz = (p.z0 + p.z1) / 2, ox = Math.sin(rot), oz = Math.cos(rot), out = Math.sign((mx - pen.x) * ox + (mz - pen.z) * oz) || 1; q.setFromAxisAngle(up, rot + (out < 0 ? Math.PI : 0)); m4.compose(new THREE.Vector3(mx + ox * 0.3 * out, p.y + 2.6, mz + oz * 0.3 * out), q, new THREE.Vector3(1.6, 1.6, 1)); ims.setMatrixAt(i, m4); });
       scene.add(ims);
     }
+    // warning beacons on the fence posts (and the raptor pen): slow amber blinks, fast red after a breach
+    const bpos = [];
+    C.panels.forEach((p, i) => { if (i % 5 === 0) bpos.push([p.x0, p.y + (p.outer ? 8.9 : 8.9), p.z0]); });
+    if (C.pen) C.pen.panels.forEach((p, i) => { if (i % 4 === 0) bpos.push([p.x0, p.y + 6.7, p.z0]); });
+    this.addBeacons(scene, bpos, 'fence');
     this.floods = C.towers.map(([x, z]) => { const l = new THREE.SpotLight(0xfff4e0, 0, 120, 0.7, 0.5, 1.2); l.position.set(x, C.y + 18, z); l.target.position.set(C.x, C.y, C.z); scene.add(l, l.target); return l; });
+  }
+
+  // rotating-beacon style warning lights: a dark housing and a lamp whose colour we flash per instance
+  addBeacons(scene, pos, group) {
+    const n = pos.length;
+    const housing = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.42, 0.48, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 }), n);
+    const lamp = new THREE.InstancedMesh(new THREE.SphereGeometry(0.46, 12, 8, 0, TAU, 0, Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), n);
+    const m4 = new THREE.Matrix4();
+    pos.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); housing.setMatrixAt(i, m4); m4.makeTranslation(x, y + 0.15, z); lamp.setMatrixAt(i, m4); lamp.setColorAt(i, new THREE.Color(0, 0, 0)); });
+    scene.add(housing, lamp);
+    (this.beacons || (this.beacons = [])).push({ lamp, housing, n, group, phase: pos.map((p, i) => i * 0.37) });
+  }
+
+  updateBeacons(time, breached) {
+    const on = new THREE.Color(), off = new THREE.Color(0.05, 0.02, 0);
+    for (const B of this.beacons || []) {
+      const alarm = B.group === 'fence' && breached;
+      for (let i = 0; i < B.n; i++) {
+        const t = time * (alarm ? 6 : B.group === 'gate' ? 2.2 : 0.9) + B.phase[i] * (alarm ? 0.5 : 1);
+        const lit = (t % 1) < (alarm ? 0.5 : 0.35);
+        if (alarm) on.setRGB(4, 0.25, 0.15); else on.setRGB(4, 2.0, 0.25); // red when breached, amber otherwise
+        B.lamp.setColorAt(i, lit ? on : off);
+      }
+      B.lamp.instanceColor.needsUpdate = true;
+    }
+    if (this.gateGlow) this.gateGlow.forEach((l, k) => { l.intensity = ((time * 2.2 + k * 0.5) % 1) < 0.35 ? 60 : 0; });
+  }
+
+  // the T-rex brings the entrance arch down: the top crashes to the road, the columns topple outward
+  collapseArch(game) {
+    if (this.archFall || !this.archTop) return;
+    this.archFall = { t: 0, landed: false };
+    for (const B of this.beacons || []) if (B.group === 'gate') { B.lamp.visible = B.housing.visible = false; }
+    if (this.gateGlow) for (const l of this.gateGlow) l.visible = false;
+    const G = this.world.parkGate;
+    for (const c of this.world.colliders) if (c.tall && Math.hypot(c.x - G.x, c.z - G.z) < G.half + 3 && c.type === 'box' && c.hx === 1.4) c.broken = true; // the pillars no longer stand
+    if (game && game.audio.crash) game.audio.crash(1);
+  }
+
+  animateArch(dt, game) {
+    const F = this.archFall;
+    if (!F || F.done) return;
+    F.t += dt;
+    const G = this.world.parkGate, t = F.t;
+    // the top: drops like a stone, twisting as it goes, then lies on the road
+    const fall = Math.min(1, (t * t * 4.9) / 13.6);
+    this.archTop.position.y = G.y + 14.6 - 13.6 * fall;
+    this.archTop.rotation.set(fall * 0.25, 0, fall * 0.35);
+    // the columns: tip outward from their footings, slowly then fast
+    for (const c of this.archCols) {
+      const a = Math.min(Math.PI / 2 - 0.08, t * t * 0.9);
+      c.g.quaternion.setFromAxisAngle(this.archAxis, -c.sd * a);
+    }
+    if (!F.landed && fall >= 1) {
+      F.landed = true;
+      if (game) { game.effects.burstSparks(G.x, G.y + 1, G.z, 0, 0, 30); for (let k = 0; k < 18; k++) game.props.debris.spawn(G.x + (Math.random() - 0.5) * 12, G.y + 1 + Math.random() * 2, G.z + (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 8, 3 + Math.random() * 4, (Math.random() - 0.5) * 8, 0.6, 0.3, 0.3, 0x6a4a2c); if (game.audio.crash) game.audio.crash(1); }
+    }
+    if (t > 3) F.done = true;
   }
 
   // a panel knocked out: hide it; a breach sets the tyrannosaur loose
@@ -406,6 +484,12 @@ export class PrimevalValley {
       if (near) d.update(Math.min(dt, 0.05), this.world, time, this.dinos);
     }
     for (const t of this.torches) { const f = 0.85 + Math.sin(time * 17 + t.position.x) * 0.1 + Math.sin(time * 29) * 0.06; t.scale.set(f, 0.8 + f * 0.4, f); }
+    const C = this.world.rex;
+    const breached = !!C && (C.panels.some((p) => p.broken) || (C.pen && C.pen.panels.some((p) => p.broken)));
+    this.updateBeacons(time, breached);
+    this.animateArch(Math.min(dt, 0.05), this.game);
+    // the breach klaxon, loud near the compound and fading with distance
+    if (this.audio && this.audio.klaxon) this.audio.klaxon(breached ? Math.max(0, 1 - Math.hypot(camPos.x - C.x, camPos.z - C.z) / 650) : 0);
     const nearC = this.world.rex && Math.hypot(camPos.x - this.world.rex.x, camPos.z - this.world.rex.z) < 600;
     if (this.floods) for (const l of this.floods) l.intensity = nearC ? (this.night ? 900 : 0) : 0;
   }
@@ -651,7 +735,7 @@ export class TRex {
       seg.rotation.x = k === 0 ? -0.25 - run * 0.08 : 0.03 + f * 0.02;
       seg.rotation.y = Math.sin(time * 1.4 - k * 0.35 + this.phase * TAU) * (0.03 + f * 0.05) * (0.5 + amt) + sw * (0.12 + f * 0.06);
     });
-    if (this.state !== 'caged') { this.smash(dt, sw); this.eat(); }
+    if (this.state !== 'caged') { this.smash(dt, sw); this.eat(); this.wreck(); }
   }
 
   think(dt, pd, P, C, g, w) {
@@ -696,6 +780,24 @@ export class TRex {
     let best = null, bd = range;
     for (const a of (A && A.list) || []) { if (a.eaten) continue; const d = Math.hypot(a.x - this.x, a.z - this.z); if (d < bd) { bd = d; best = a; } }
     return best;
+  }
+
+  // whatever they run into goes over: signs, lamp posts, traffic lights, street furniture, shop glass
+  wreck() {
+    const g = this.game, w = this.world, R = this.opts.lite ? 1.2 : 4.5 * this.S, fwd = this.opts.lite ? 0.5 : 2.5 * this.S;
+    const cx = this.x + Math.sin(this.heading) * fwd, cz = this.z + Math.cos(this.heading) * fwd;
+    const out = this._near || (this._near = []);
+    w.queryColliders(cx - R, cz - R, cx + R, cz + R, out);
+    for (const c of out) {
+      if (c.broken || !c.breakable || c.rexPanel !== undefined || c.penPanel !== undefined) continue;
+      if (Math.hypot(c.x - cx, c.z - cz) > R + (c.r || 0.5)) continue;
+      c.broken = true;
+      const fake = { pos: { x: this.x, y: this.root.position.y + 1, z: this.z }, vel: new THREE.Vector3(Math.sin(this.heading) * (this.speed + 3), 0, Math.cos(this.heading) * (this.speed + 3)) };
+      if (g.collisions.onBreak) g.collisions.onBreak(c, fake, c.x, c.z);
+    }
+    // and the park's entrance arch, if the big one comes through it
+    const G = w.parkGate;
+    if (!this.opts.lite && G && Math.hypot(this.x - G.x, this.z - G.z) < 16) g.park.collapseArch(g);
   }
 
   // anything that gets within reach of the jaws is eaten
