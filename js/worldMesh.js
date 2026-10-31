@@ -4,6 +4,7 @@ import { mergeGeometries } from '../lib/addons/utils/BufferGeometryUtils.js';
 import { N, NV, CELL, HALF, SIZE, CITY, SURF, WATER } from './world.js';
 import { mulberry32, smoothstep, clamp, lerp } from './noise.js';
 import * as TX from './textures.js';
+import { graffitiQuad, graffitiMesh } from './props.js';
 
 const lin = (hex) => new THREE.Color(hex);
 
@@ -415,14 +416,40 @@ export function buildWorldMeshes(world, scene) {
   const walkTex = TX.sidewalkTexture();
   const walkB = new GeoBuilder();
   const lawnB = new GeoBuilder();
+  const bayB = new GeoBuilder();
   for (const blk of world.blocks) {
     const cx = (blk.x0 + blk.x1) / 2, cz = (blk.z0 + blk.z1) / 2;
     const hx = (blk.x1 - blk.x0) / 2, hz = (blk.z1 - blk.z0) / 2;
     if (blk.kind === 'fwy') { lawnB.top(blk.x0, blk.z0, blk.x1, blk.z1, blk.y + 0.02, 1 / 6); continue; } // grass under the expressway
     if (!blk.slope) {
       const yTop = blk.y + CITY.curb;
-      walkB.box(cx, cz, hx, hz, blk.y - 0.4, yTop, 1 / 4, 1 / 4, false);
-      walkB.top(blk.x0, blk.z0, blk.x1, blk.z1, yTop, 1 / 4);
+      if (blk.bays && blk.bays.length) {
+        // the slab in pieces round the parking bays: a core, then edge strips broken where a bay is cut in
+        const D = 2.4, slab = (x0, z0, x1, z1) => {
+          if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
+          walkB.box((x0 + x1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (z1 - z0) / 2, blk.y - 0.4, yTop, 1 / 4, 1 / 4, false);
+          walkB.top(x0, z0, x1, z1, yTop, 1 / 4);
+        };
+        slab(blk.x0 + D, blk.z0 + D, blk.x1 - D, blk.z1 - D);
+        const strip = (alongX, lo, hi, a, b, sgn) => {
+          const cuts = blk.bays.filter((q) => q.alongX === alongX && q.sgn === sgn).map((q) => alongX ? [q.x0, q.x1] : [q.z0, q.z1]).sort((p, q) => p[0] - q[0]);
+          let u = lo;
+          for (const [c0, c1] of [...cuts, [hi, hi]]) { if (c0 > u) alongX ? slab(u, a, c0, b) : slab(a, u, b, c0); u = Math.max(u, c1); }
+        };
+        strip(true, blk.x0, blk.x1, blk.z0, blk.z0 + D, -1);
+        strip(true, blk.x0, blk.x1, blk.z1 - D, blk.z1, 1);
+        strip(false, blk.z0 + D, blk.z1 - D, blk.x0, blk.x0 + D, -1);
+        strip(false, blk.z0 + D, blk.z1 - D, blk.x1 - D, blk.x1, 1);
+        // asphalt in the bays, white lines between the spaces
+        for (const q of blk.bays) {
+          const y = q.y + 0.035, L = (q.alongX ? q.x1 - q.x0 : q.z1 - q.z0) / q.SL;
+          if (q.alongX) bayB.quad([q.x0, y, q.z1], [q.x1, y, q.z1], [q.x1, y, q.z0], [q.x0, y, q.z0], [[0, 0], [L, 0], [L, 1], [0, 1]]);
+          else bayB.quad([q.x0, y, q.z1], [q.x1, y, q.z1], [q.x1, y, q.z0], [q.x0, y, q.z0], [[L, 0], [L, 1], [0, 1], [0, 0]]);
+        }
+      } else {
+        walkB.box(cx, cz, hx, hz, blk.y - 0.4, yTop, 1 / 4, 1 / 4, false);
+        walkB.top(blk.x0, blk.z0, blk.x1, blk.z1, yTop, 1 / 4);
+      }
       if (blk.kind === 'park' || blk.kind === 'res') {
         const w = CITY.walk;
         lawnB.top(blk.x0 + w, blk.z0 + w, blk.x1 - w, blk.z1 - w, yTop + 0.02, 1 / 6);
@@ -443,6 +470,9 @@ export function buildWorldMeshes(world, scene) {
     }
     for (const [x, s] of [[blk.x0, -1], [blk.x1, 1]]) walkB.wall(x, s < 0 ? blk.z0 : blk.z1, s, 0, blk.z1 - blk.z0, Y(x) - 0.4 - CITY.curb, Y(x), 0, 1 / 4, 1 / 4);
   }
+  const bayMesh = new THREE.Mesh(bayB.geometry(), new THREE.MeshStandardMaterial({ map: TX.parkingBayTexture(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  bayMesh.receiveShadow = true;
+  group.add(bayMesh);
   const walkMesh = new THREE.Mesh(walkB.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9 }));
   walkMesh.receiveShadow = true;
   group.add(walkMesh);
@@ -928,6 +958,7 @@ export function buildWorldMeshes(world, scene) {
 
   // ---------------- bridges ----------------
   const bb = new GeoBuilder();
+  const pierTags = [], pierR = mulberry32(808);
   const deckTop = new GeoBuilder();
   const railB = new GeoBuilder();
   for (const br of world.bridges) {
@@ -971,11 +1002,16 @@ export function buildWorldMeshes(world, scene) {
             const cx = a.x + rx * br.halfW * s, cz = a.z + rz * br.halfW * s;
             if (!clear(cx, cz)) continue;
             bb.box(cx, cz, 0.7, 0.7, th - 2, a.y - 1.0, 1, 1, false);
+            if (world.inCityRect(cx, cz, 0) && pierR() < 0.45) { // tagged pillars under the expressways
+              const f = Math.floor(pierR() * 4), nx = [1, -1, 0, 0][f], nz = [0, 0, 1, -1][f];
+              graffitiQuad(pierTags, cx + nx * 0.74, th + 1.0 + pierR() * 0.6, cz + nz * 0.74, 1.3, 0.7, Math.atan2(nx, nz), Math.floor(pierR() * 8));
+            }
           }
         }
       }
     }
   }
+  if (pierTags.length) group.add(graffitiMesh(pierTags));
   const bridgeMesh = new THREE.Mesh(bb.geometry(), new THREE.MeshStandardMaterial({ color: 0x9a958c, roughness: 0.85, side: THREE.DoubleSide }));
   bridgeMesh.castShadow = true; bridgeMesh.receiveShadow = true;
   group.add(bridgeMesh);
@@ -1241,7 +1277,7 @@ export function buildWorldMeshes(world, scene) {
   // ---------------- trees ----------------
   const treeGeos = [makeBroadleafs(), makeConifers(), makeBushes()];
   const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88 });
-  const treeTiles = {};
+  const treeTiles = {}, treeLod = [];
   const pickW = (u, W) => { let a = 0; for (let i = 0; i < W.length; i++) { a += W[i]; if (u < a) return i; } return W.length - 1; };
   for (const t of world.trees) {
     // species chosen from the spot: stable between runs, spruce/fir higher up, birches by the water
@@ -1257,21 +1293,31 @@ export function buildWorldMeshes(world, scene) {
   for (const k in treeTiles) {
     const list = treeTiles[k];
     const [, type, variant] = k.split('|').map(Number);
-    const im = new THREE.InstancedMesh(treeGeos[type][variant], treeMat, list.length);
+    const im = new THREE.InstancedMesh(type === 0 ? treeGeos[0].lo[variant] : treeGeos[type][variant], treeMat, list.length);
+    // broadleafs: a detailed copy of the tile shown close up, the cheap one further out
+    const imHi = type === 0 ? new THREE.InstancedMesh(treeGeos[0].hi[variant], treeMat, list.length) : null;
     list.forEach((t, i) => {
       q4.setFromAxisAngle(yAxis, t.rot);
       s4.set(t.s, t.s * (0.9 + t.tint * 0.25), t.s);
       p4.set(t.x, t.y - 0.2, t.z);
       m4.compose(p4, q4, s4);
       im.setMatrixAt(i, m4);
-      t.im = im; t.ii = i;
+      t.im = im; t.ii = i; t.imHi = imHi;
       tint.setHSL(0.2 + (t.tint - 0.5) * 0.1, 0.1 + t.tint * 0.12, 0.55 + (t.tint - 0.5) * 0.14);
       tint.multiplyScalar(1.3);
       im.setColorAt(i, tint);
+      if (imHi) { imHi.setMatrixAt(i, m4); imHi.setColorAt(i, tint); }
     });
     im.castShadow = true; im.receiveShadow = true;
     im.computeBoundingSphere();
     group.add(im);
+    if (imHi) {
+      imHi.castShadow = true; imHi.receiveShadow = true;
+      imHi.computeBoundingSphere();
+      imHi.visible = false;
+      group.add(imHi);
+      treeLod.push({ lo: im, hi: imHi, c: im.boundingSphere.center, r: im.boundingSphere.radius });
+    }
   }
   // rocks
   if (world.rocks.length) {
@@ -1306,6 +1352,14 @@ export function buildWorldMeshes(world, scene) {
       tm.compose(tp.set(t.x, t.y - 0.2, t.z), tq, ts);
       t.im.setMatrixAt(t.ii, tm);
       t.im.instanceMatrix.needsUpdate = true;
+      if (t.imHi) { t.imHi.setMatrixAt(t.ii, tm); t.imHi.instanceMatrix.needsUpdate = true; }
+    },
+    // swap each tile of broadleafs between its detailed and cheap version by distance
+    updateLod(cam) {
+      for (const L of treeLod) {
+        const near = Math.hypot(L.c.x - cam.x, L.c.z - cam.z) - L.r < 110;
+        L.hi.visible = near; L.lo.visible = !near;
+      }
     },
   };
   return { group, mats, lamps, signals, rails, trees, tunnelLamps };
@@ -1368,12 +1422,12 @@ function autoRails(br) {
 }
 
 // ---- trees: several species per type, foliage shaded with soft "canopy" normals ----
-function trunkGeo(r0, r1, h, col, bend = 0, seed = 1) {
-  const g = new THREE.CylinderGeometry(r1, r0, h, 7, 4);
+function trunkGeo(r0, r1, h, col, bend = 0, seed = 1, seg = 7) {
+  const g = new THREE.CylinderGeometry(r1, r0, h, seg, seg > 7 ? 7 : 4);
   const p = g.attributes.position, r = mulberry32(seed);
   for (let q = 0; q < p.count; q++) {
-    const y = p.getY(q) + h / 2, k = y / h;
-    p.setXYZ(q, p.getX(q) * (0.9 + r() * 0.2) + bend * k * k, y, p.getZ(q) * (0.9 + r() * 0.2) + bend * 0.4 * k * k);
+    const y = p.getY(q) + h / 2, k = y / h, flare = 1 + 0.45 * Math.max(0, 1 - k / 0.12); // roots spreading at the foot
+    p.setXYZ(q, p.getX(q) * flare * (0.9 + r() * 0.2) + bend * k * k, y, p.getZ(q) * flare * (0.9 + r() * 0.2) + bend * 0.4 * k * k);
   }
   paint(g, col);
   return g;
@@ -1444,53 +1498,82 @@ function blobRing(r, cx, cy, cz, n, rad, sz, jit = 0.4) {
 }
 
 // broadleaf species: round, oak, birch, poplar, copper beech, autumn maple
+// broadleaf trees are grown from a spec: a flared trunk splits into limbs, limbs fork into twigs, and leaf clusters
+// sit on the twig tips round a filled-in crown. Each species comes as a close-up version (twigs, finer leaf lumps
+// and a leafy fringe) and a cheap far version from the same skeleton.
+const BROADLEAF_SPECS = [
+  // round crown with visible limbs
+  { seed: 5, bark: 0x4a3828, tr: 0.36, th: 4.4, bend: 0.15, limbs: 5, ll: 2.6, pitch: 0.75, twigs: 2, leaf: 1.25, fill: 2.4, lo: 0x1f3812, hi: 0x6a8a2e },
+  // oak: thick, gnarled, wide and low
+  { seed: 21, bark: 0x3d3226, tr: 0.56, th: 3.4, bend: 0.3, limbs: 6, ll: 3.4, pitch: 0.45, twigs: 3, leaf: 1.35, fill: 2.6, lo: 0x1c3010, hi: 0x557626, squash: 0.78 },
+  // birch: slim white trunk, airy pale crown with hanging twigs
+  { seed: 31, bark: 0xe6e2d8, birch: true, tr: 0.18, th: 7.2, bend: 0.25, limbs: 7, ll: 1.5, pitch: 0.55, twigs: 2, droop: true, leaf: 0.75, fill: 1.2, lo: 0x3a5a1c, hi: 0xa2c050, squash: 0.95 },
+  // lombardy poplar: tall narrow column
+  { seed: 41, bark: 0x50402e, tr: 0.28, th: 5.0, bend: 0, limbs: 9, ll: 1.1, pitch: 1.25, twigs: 1, column: true, leaf: 0.95, fill: 1.0, lo: 0x22401a, hi: 0x64923a, squash: 1.25 },
+  // copper beech: dark purple-red dome
+  { seed: 51, bark: 0x5a5650, tr: 0.4, th: 4.0, bend: 0.1, limbs: 6, ll: 2.8, pitch: 0.65, twigs: 2, leaf: 1.3, fill: 2.6, lo: 0x2a1414, hi: 0x7a3a2c },
+  // maple turning: orange and gold
+  { seed: 61, bark: 0x46362a, tr: 0.34, th: 4.0, bend: 0.2, limbs: 5, ll: 2.5, pitch: 0.8, twigs: 2, leaf: 1.2, fill: 2.3, lo: 0x6a2a0e, hi: 0xf0aa38 },
+];
+function growBroadleaf(S, hiDetail) {
+  const r = mulberry32(S.seed), parts = [];
+  const tr = trunkGeo(S.tr, S.tr * 0.55, S.th, S.bark, S.bend, S.seed, hiDetail ? 10 : 6);
+  if (S.birch) { const p = tr.attributes.position, col = tr.attributes.color; for (let q = 0; q < p.count; q++) if (Math.sin(p.getY(q) * 9.1 + p.getX(q) * 20) > 0.7) col.setXYZ(q, 0.12, 0.11, 0.1); }
+  parts.push(tr);
+  const bx = S.bend, tip = (y) => bx * (y / S.th) ** 2; // the trunk's lean, so limbs start on it
+  const blobs = [];
+  for (let i = 0; i < S.limbs; i++) {
+    const a = (i / S.limbs) * Math.PI * 2 + r() * 0.7;
+    const y0 = S.column ? S.th * (0.35 + 0.65 * i / S.limbs) : S.th * (0.55 + r() * 0.4);
+    const pitch = S.pitch + (r() - 0.5) * 0.35, L = S.ll * (0.8 + r() * 0.45);
+    const x0 = tip(Math.min(y0, S.th)), z0 = x0 * 0.4;
+    const ex = x0 + Math.cos(a) * Math.cos(pitch) * L, ey = y0 + Math.sin(pitch) * L, ez = z0 + Math.sin(a) * Math.cos(pitch) * L;
+    parts.push(branch(x0, y0, z0, ex, ey, ez, S.tr * 0.42, S.bark));
+    blobs.push([ex, ey + S.leaf * 0.2, ez, S.leaf * (0.95 + r() * 0.35)]);
+    for (let j = 0; j < S.twigs; j++) { // forks off the limb, splaying out and up (birch twigs hang)
+      const f = 0.55 + r() * 0.4, sx = x0 + (ex - x0) * f, sy = y0 + (ey - y0) * f, sz = z0 + (ez - z0) * f;
+      const b = a + (j % 2 ? 1 : -1) * (0.5 + r() * 0.5), tp = S.droop ? -0.5 - r() * 0.4 : pitch + 0.25 + r() * 0.3, tl = L * (0.45 + r() * 0.3);
+      const tx = sx + Math.cos(b) * Math.cos(tp) * tl, ty = sy + Math.sin(tp) * tl, tz = sz + Math.sin(b) * Math.cos(tp) * tl;
+      if (hiDetail) parts.push(branch(sx, sy, sz, tx, ty, tz, S.tr * 0.17, S.bark));
+      blobs.push([tx, ty + S.leaf * 0.15, tz, S.leaf * (0.75 + r() * 0.35)]);
+    }
+  }
+  // fill the middle of the crown so it doesn't read as a ring of lumps
+  const top = S.th + S.ll * Math.sin(S.pitch) * 0.9;
+  if (S.column) for (let k = 0; k < 5; k++) blobs.push([(r() - 0.5) * 0.4, S.th * 0.5 + k * (top - S.th * 0.4) / 5, (r() - 0.5) * 0.4, S.fill * (1.2 - Math.abs(k - 2) * 0.12)]);
+  else {
+    blobs.push([tip(S.th), top, tip(S.th) * 0.4, S.fill * 0.85]);
+    for (let k = 0; k < 4; k++) { const a = r() * 6.28; blobs.push([Math.cos(a) * S.fill * 0.5, (S.th + top) / 2 + (r() - 0.3) * S.fill * 0.5, Math.sin(a) * S.fill * 0.5, S.fill * (0.7 + r() * 0.2)]); }
+  }
+  const leaves = foliage(blobs, S.lo, S.hi, S.seed + 1, S.squash || 0.85, hiDetail ? 1 : 0);
+  parts.push(...leaves);
+  if (hiDetail) { // a fringe of small leaf tufts over the surface of every clump: a ragged, leafy silhouette
+    const A = new THREE.Color(S.lo), B = new THREE.Color(S.hi), c = new THREE.Color();
+    let y0 = 1e9, y1 = -1e9;
+    for (const [, y, , s] of blobs) { y0 = Math.min(y0, y - s); y1 = Math.max(y1, y + s); }
+    const C = leaves[0].userData.canopy;
+    for (const [x, y, z, s] of blobs) {
+      const n = Math.round(s * s * 9);
+      for (let k = 0; k < n; k++) {
+        const u = r() * 2 - 1, ph = r() * 6.283, sq = Math.sqrt(1 - u * u), d = s * (0.92 + r() * 0.2);
+        const px = x + sq * Math.cos(ph) * d, py = y + u * d * (S.squash || 0.85), pz = z + sq * Math.sin(ph) * d;
+        if (py < y - s * 0.6) continue; // (the underside is hidden anyway)
+        const g = new THREE.OctahedronGeometry(0.2 + r() * 0.16, 0).toNonIndexed();
+        g.rotateY(r() * 3); g.rotateX(r() * 3); g.translate(px, py, pz);
+        const t = clamp((py - y0) / (y1 - y0), 0, 1);
+        c.copy(A).lerp(B, clamp(t * 0.75 + 0.3 + (r() - 0.5) * 0.3, 0, 1)).multiplyScalar(0.9 + r() * 0.25);
+        const arr = new Float32Array(g.attributes.position.count * 3);
+        for (let q = 0; q < arr.length; q += 3) { arr[q] = c.r; arr[q + 1] = c.g; arr[q + 2] = c.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+        g.userData.canopy = C;
+        parts.push(g);
+      }
+    }
+  }
+  return finishTree(parts);
+}
 function makeBroadleafs() {
-  const out = [];
-  { // round crown with visible limbs
-    const r = mulberry32(5), bark = 0x4a3828;
-    const parts = [trunkGeo(0.32, 0.2, 3.6, bark, 0.15, 3), branch(0, 2.8, 0, 1.1, 4.2, 0.3, 0.12, bark), branch(0, 3.0, 0, -0.9, 4.4, -0.5, 0.11, bark)];
-    parts.push(...foliage([[0, 5.0, 0, 2.2], [0.2, 6.1, 0.1, 1.5], ...blobRing(r, 0, 4.5, 0, 6, 1.6, 1.3)], 0x1f3812, 0x5f7f2a, 11));
-    out.push(finishTree(parts));
-  }
-  { // oak: thick, gnarled, wide low crown
-    const r = mulberry32(21), bark = 0x3d3226;
-    const parts = [trunkGeo(0.48, 0.3, 3.0, bark, 0.3, 7)];
-    for (const [x, z] of [[1.8, 0.4], [-1.5, 0.9], [0.3, -1.7], [-0.6, -1.2]]) parts.push(branch(0, 2.4, 0, x, 3.9 + r() * 0.6, z, 0.16, bark));
-    parts.push(...foliage([[0, 5.0, 0, 2.0], ...blobRing(r, 0, 4.4, 0, 8, 2.3, 1.45), ...blobRing(r, 0, 5.4, 0, 4, 1.2, 1.3)], 0x1c3010, 0x4f6e24, 23, 0.75));
-    out.push(finishTree(parts));
-  }
-  { // birch: slim white trunk with dark marks, airy pale crown
-    const r = mulberry32(31);
-    const tr = trunkGeo(0.16, 0.09, 6.2, 0xe6e2d8, 0.25, 9);
-    const p = tr.attributes.position, col = tr.attributes.color;
-    for (let q = 0; q < p.count; q++) if (Math.sin(p.getY(q) * 9.1 + p.getX(q) * 20) > 0.75) col.setXYZ(q, 0.12, 0.11, 0.1);
-    const parts = [tr];
-    const bl = [];
-    for (let k = 0; k < 9; k++) bl.push([(r() - 0.5) * 1.8, 3.8 + k * 0.38, (r() - 0.5) * 1.8, 0.75 + r() * 0.45]);
-    parts.push(...foliage(bl, 0x3a5a1c, 0x9ab84a, 33, 0.9));
-    out.push(finishTree(parts));
-  }
-  { // lombardy poplar: tall narrow column
-    const r = mulberry32(41);
-    const parts = [trunkGeo(0.24, 0.12, 4.0, 0x50402e, 0, 4)];
-    const bl = [];
-    for (let k = 0; k < 8; k++) bl.push([(r() - 0.5) * 0.6, 2.8 + k * 0.85, (r() - 0.5) * 0.6, 1.15 - Math.abs(k - 3) * 0.1]);
-    parts.push(...foliage(bl, 0x22401a, 0x5c8a30, 43, 1.25));
-    out.push(finishTree(parts));
-  }
-  { // copper beech: dark purple-red crown
-    const r = mulberry32(51), bark = 0x5a5650;
-    const parts = [trunkGeo(0.34, 0.22, 3.4, bark, 0.1, 5)];
-    parts.push(...foliage([[0, 5.0, 0, 2.3], ...blobRing(r, 0, 4.6, 0, 7, 1.9, 1.35)], 0x2a1414, 0x6e3428, 53));
-    out.push(finishTree(parts));
-  }
-  { // maple turning: orange and gold
-    const r = mulberry32(61), bark = 0x46362a;
-    const parts = [trunkGeo(0.3, 0.2, 3.4, bark, 0.2, 6)];
-    parts.push(...foliage([[0, 5.0, 0, 2.1], [0.3, 6.0, 0, 1.4], ...blobRing(r, 0, 4.6, 0, 6, 1.7, 1.3)], 0x6a2a0e, 0xe8a030, 63));
-    out.push(finishTree(parts));
-  }
-  return out;
+  return { hi: BROADLEAF_SPECS.map((S) => growBroadleaf(S, true)), lo: BROADLEAF_SPECS.map((S) => growBroadleaf(S, false)) };
 }
 const BROADLEAF_WEIGHTS = [0.3, 0.22, 0.2, 0.13, 0.08, 0.07];
 

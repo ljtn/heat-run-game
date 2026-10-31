@@ -1449,6 +1449,7 @@ export class World {
     this.buildPlazaTerraces();
     this.buildAlleyFeatures();
     this.buildCoveredStreets();
+    this.planParkingBays();
     // park trees (after ramps so they stay clear of them)
     for (const blk of this.blocks) {
       if (!blk.treesPending) continue;
@@ -1596,6 +1597,47 @@ export class World {
     b.door = door;
   }
 
+  // parking bays: lay-bys cut 2.4 m into the sidewalk, so cars parked along the street sit out of the traffic lane
+  planParkingBays() {
+    const R = this.rand, D = 2.4, SL = 6.2;
+    this.bays = [];
+    for (const blk of this.blocks) {
+      blk.bays = [];
+      if (blk.kind === 'fwy' || blk.slope) continue;
+      const sides = [
+        { alongX: true, lo: blk.x0, hi: blk.x1, a: blk.z0, b: blk.z0 + D, sgn: -1 },
+        { alongX: true, lo: blk.x0, hi: blk.x1, a: blk.z1 - D, b: blk.z1, sgn: 1 },
+        { alongX: false, lo: blk.z0, hi: blk.z1, a: blk.x0, b: blk.x0 + D, sgn: -1 },
+        { alongX: false, lo: blk.z0, hi: blk.z1, a: blk.x1 - D, b: blk.x1, sgn: 1 },
+      ];
+      for (const sd of sides) {
+        if (R() > 0.25) continue;
+        const room = sd.hi - sd.lo - 28; // clear of the corners (crossings, traffic lights, hydrants)
+        let n = Math.min(3 + Math.floor(R() * 6), Math.floor(room / SL));
+        if (n < 2) continue;
+        const u0 = sd.lo + 14 + R() * (room - n * SL), u1 = u0 + n * SL;
+        const bay = sd.alongX ? { x0: u0, x1: u1, z0: sd.a, z1: sd.b } : { x0: sd.a, x1: sd.b, z0: u0, z1: u1 };
+        let ok = true;
+        for (let u = u0; u <= u1 && ok; u += 2) {
+          const [x, z] = sd.alongX ? [u, (sd.a + sd.b) / 2] : [(sd.a + sd.b) / 2, u];
+          if (this.excluded(x, z, 1.5) || this.cityBlockAt(sd.alongX ? x : x - sd.sgn * 4, sd.alongX ? z - sd.sgn * 4 : z) !== blk) ok = false;
+        }
+        if (!ok) continue;
+        Object.assign(bay, { alongX: sd.alongX, sgn: sd.sgn, n, SL, blk, y: CITY.at((bay.x0 + bay.x1) / 2, (bay.z0 + bay.z1) / 2) });
+        this.bays.push(bay);
+        blk.bays.push(bay);
+        this.excl.push({ x0: bay.x0, x1: bay.x1, z0: bay.z0, z1: bay.z1 }); // nothing else stands in the bay
+      }
+    }
+  }
+
+  inBay(x, z) {
+    const blk = this.cityBlockAt(x, z);
+    if (!blk || !blk.bays) return false;
+    for (const b of blk.bays) if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return true;
+    return false;
+  }
+
   // café parklets: in the kerb strip outside a café, a U of wooden planters round tables and chairs under a big sun roof
   buildParklets() {
     const R = this.rand;
@@ -1612,7 +1654,7 @@ export class World {
       const off = curb + sgn * 1.6; // centre of the kerb strip, 1.6 m out from the kerb
       const at = (u, v) => (alongX ? [mx + u, off + sgn * v] : [off + sgn * v, mz + u]);
       const [cx, cz] = at(0, 0);
-      if (this.onRampPath(cx, cz, 4) || this.parklets.some((p) => Math.hypot(p.x - cx, p.z - cz) < 30)) continue;
+      if (this.onRampPath(cx, cz, 4) || this.parklets.some((p) => Math.hypot(p.x - cx, p.z - cz) < 30) || this.bays.some((b) => cx > b.x0 - 6 && cx < b.x1 + 6 && cz > b.z0 - 6 && cz < b.z1 + 6)) continue;
       const y = CITY.at(cx, cz);
       const rot = alongX ? 0 : Math.PI / 2;
       // planters: two along the traffic side, one at each end
@@ -1631,18 +1673,15 @@ export class World {
   buildRoadsideParking() {
     const R = this.rand;
     let kerb = 0;
-    const types = ['sedan', 'sedan', 'compact', 'pickup', 'van', 'taxi'];
-    for (const e of this.edges) {
-      if (e.type !== 'city' || R() > 0.25 || kerb > 60) continue;
-      const P = e.pts, A = P[0], B = P[P.length - 1];
-      const L = Math.hypot(B.x - A.x, B.z - A.z), tx = (B.x - A.x) / L, tz = (B.z - A.z) / L;
-      const side = R() < 0.5 ? -1 : 1, off = (e.halfW - 1.5) * side; // in the kerb strip, clear of the traffic lane
-      for (let t = 20; t < L - 20 && kerb <= 60; t += 6.4) {
-        if (R() < 0.3) continue;
-        const x = A.x + tx * t - tz * off, z = A.z + tz * t + tx * off;
-        if (this.onRampPath(x, z, 2) || this.parklets.some((p) => Math.hypot(p.x - x, p.z - z) < 9) || this.covers && this.covers.some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1)) continue;
-        const heading = Math.atan2(-tx, -tz) + (side > 0 ? 0 : Math.PI);
-        this.parkedCars.push({ x, z, y: CITY.at(x, z), heading, type: types[Math.floor(R() * types.length)], kerb: true });
+    const types = ['sedan', 'sedan', 'compact', 'compact', 'pickup', 'van', 'taxi'];
+    for (const bay of this.bays) {
+      for (let k = 0; k < bay.n; k++) {
+        if (R() < 0.38) continue; // free spaces
+        const u = (bay.alongX ? bay.x0 : bay.z0) + (k + 0.5) * bay.SL + (R() - 0.5) * 0.5, c = bay.alongX ? (bay.z0 + bay.z1) / 2 : (bay.x0 + bay.x1) / 2;
+        const x = bay.alongX ? u : c, z = bay.alongX ? c : u;
+        // parked nose to the traffic flow on that side
+        const heading = bay.alongX ? (bay.sgn > 0 ? Math.PI / 2 : -Math.PI / 2) : (bay.sgn > 0 ? Math.PI : 0);
+        this.parkedCars.push({ x, z, y: CITY.at(x, z), heading: heading + (R() - 0.5) * 0.04, type: types[Math.floor(R() * types.length)], kerb: true });
         kerb++;
       }
     }
@@ -2502,6 +2541,19 @@ export class World {
       }
       // a hydrant near one corner of each block
       this.addProp('hydrant', blk.x0 + 2.2, blk.z0 + 2.2 + R() * 3, y, 0);
+      // cardboard boxes and rubbish bags heaped against the buildings round the street corners
+      if (blk.kind === 'build' || blk.kind === 'plaza') {
+        const ins = CITY.walk - 0.55;
+        for (const [cx, cz, sx, sz] of [[blk.x0, blk.z0, 1, 1], [blk.x1, blk.z0, -1, 1], [blk.x0, blk.z1, 1, -1], [blk.x1, blk.z1, -1, -1]]) {
+          if (R() < 0.3) continue;
+          const alongX = R() < 0.5, n = 1 + Math.floor(R() * 3);
+          for (let k = 0; k < n; k++) {
+            const d = ins + 1.2 + k * 1.1 + R() * 0.4;
+            const x = cx + sx * (alongX ? d : ins + R() * 0.3), z = cz + sz * (alongX ? ins + R() * 0.3 : d);
+            this.addProp(R() < 0.72 ? 'boxes' : 'bags', x, z, y, R() * 6);
+          }
+        }
+      }
     }
     // drive-through corner shops: glass on the two street faces, solid posts and inner columns, a little store inside
     this.mullions = [];
@@ -3009,7 +3061,8 @@ export class World {
     if (x > CITY.x0 - 10 && x < CITY.x1 + 10 && z > CITY.z0 - 10 && z < CITY.z1 + 10) {
       const blk = this.cityBlockAt(x, z);
       if (blk && blk.kind !== 'fwy') {
-        const d = Math.min(x - blk.x0, blk.x1 - x, z - blk.z0, blk.z1 - z);
+        let d = Math.min(x - blk.x0, blk.x1 - x, z - blk.z0, blk.z1 - z);
+        if (blk.bays) for (const b of blk.bays) d = Math.min(d, Math.max(b.x0 - x, x - b.x1, b.z0 - z, z - b.z1)); // the bays are at road level
         h += CITY.curb * smoothstep(0, 0.45, d);
       }
     }
@@ -3024,7 +3077,7 @@ export class World {
     if (this.bridges.length && this.bridgeAt(x, z, 1e9) !== null) return SURF.ASPHALT;
     if (this.inCityRect(x, z, 2)) {
       const blk = this.cityBlockAt(x, z);
-      if (!blk) return SURF.ASPHALT;
+      if (!blk || this.inBay(x, z)) return SURF.ASPHALT;
       if (blk.kind === 'park' || blk.kind === 'fwy') {
         const w = CITY.walk;
         if (x < blk.x0 + w || x > blk.x1 - w || z < blk.z0 + w || z > blk.z1 - w) return SURF.CONCRETE;

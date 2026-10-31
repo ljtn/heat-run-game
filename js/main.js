@@ -786,6 +786,7 @@ class Game {
     this.aircraft.update(dt, this.camera, this.atmo.preset.night, this.traffic.heat || 0);
     this.meshes.signals.update(this.traffic.time);
     this.meshes.mats.water.userData.time.value = this.time;
+    this.meshes.trees.updateLod(this.camera.position);
     if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));

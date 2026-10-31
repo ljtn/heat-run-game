@@ -458,3 +458,56 @@ export function headlightPoolTexture() {
   ctx.putImageData(img, 0, 0);
   return tex(c, { repeat: false });
 }
+
+// one parking space (u: along the street, 6.2 m; v: across the bay, 2.4 m): asphalt, white end lines, oil stain
+export function parkingBayTexture() {
+  const W = 256, H = 100;
+  const [c, ctx] = canvas(W, H);
+  const r = mulberry32(61);
+  ctx.fillStyle = '#3d3d3f';
+  ctx.fillRect(0, 0, W, H);
+  speckle(ctx, W, H, 9000, r, (v) => { const g = 45 + Math.floor(v * 40); return `rgb(${g},${g},${g + 2})`; });
+  ctx.fillStyle = 'rgba(15,14,12,0.35)';
+  ctx.beginPath(); ctx.ellipse(W * 0.5, H * 0.5, 34, 16, 0, 0, 6.3); ctx.fill();
+  ctx.fillStyle = 'rgba(232,230,220,0.9)';
+  ctx.fillRect(0, 0, 4, H); ctx.fillRect(W - 4, 0, 4, H); // the T-marks between spaces
+  ctx.fillRect(0, H - 4, 18, 4); ctx.fillRect(W - 18, H - 4, 18, 4);
+  return tex(c);
+}
+
+// spray-paint tags in a 4 x 2 atlas: chunky outlined letters, a drop shadow, drips, the odd throw-up bubble
+export function graffitiAtlas() {
+  const CW = 256, CH = 128;
+  const [c, ctx] = canvas(CW * 4, CH * 2);
+  const r = mulberry32(1312);
+  const words = ['HEAT', 'KRAK', 'ZAP!', 'NOVA', 'RAW', 'BLOK', 'DUKE', 'FLOW', 'YO', 'MRD', 'VIBE', '2FST', 'ACE', 'GRIM'];
+  const fills = ['#ff3d6e', '#30d5ff', '#ffd23a', '#7dff5a', '#b86bff', '#ff8a1c', '#f4f4f4', '#2bd6a0'];
+  for (let k = 0; k < 8; k++) {
+    const ox = (k % 4) * CW, oy = Math.floor(k / 4) * CH;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ox, oy, CW, CH); ctx.clip();
+    const fill = fills[Math.floor(r() * fills.length)], word = words[Math.floor(r() * words.length)];
+    ctx.translate(ox + CW / 2, oy + CH / 2);
+    ctx.rotate((r() - 0.5) * 0.25);
+    ctx.transform(1, 0, (r() - 0.5) * 0.5, 1, 0, 0);
+    if (r() < 0.4) { // a throw-up bubble behind the letters
+      ctx.fillStyle = fills[Math.floor(r() * fills.length)];
+      ctx.beginPath(); ctx.ellipse(0, 0, CW * 0.44, CH * 0.36, 0, 0, 6.3); ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = '#111'; ctx.stroke();
+    }
+    const size = Math.min(84, (CW * 1.6) / word.length);
+    ctx.font = `900 ${size}px Impact, "Arial Black", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#111'; ctx.fillText(word, 5, 6); // 3D shadow
+    ctx.lineWidth = 9; ctx.strokeStyle = '#111'; ctx.strokeText(word, 0, 0);
+    ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(word, 0, 0);
+    ctx.fillStyle = fill; ctx.fillText(word, 0, 0);
+    // drips
+    ctx.strokeStyle = fill; ctx.lineWidth = 2.5;
+    for (let d = 0; d < 5; d++) { const x = (r() - 0.5) * CW * 0.6, y = size * 0.3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 6 + r() * 26); ctx.stroke(); }
+    ctx.restore();
+  }
+  const t = tex(c, { repeat: false });
+  return t;
+}

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from '../lib/addons/utils/BufferGeometryUtils.js';
 import { CITY } from './world.js';
 import { mulberry32 } from './noise.js';
+import * as TX from './textures.js';
 
 function part(geo, color, x = 0, y = 0, z = 0) {
   geo.translate(x, y, z);
@@ -370,11 +371,28 @@ export class PropSystem {
 }
 
 // back-alley dressing: fire escapes, laundry lines, wall lamps, skywalks
+// a spray-painted tag: a quad flat on a wall (rotY turns its face towards the viewer side), one cell of the atlas
+export function graffitiQuad(list, x, y, z, w, h, rotY, cell) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv, cx = cell % 4, cy = Math.floor(cell / 4);
+  for (let q = 0; q < uv.count; q++) uv.setXY(q, (cx + uv.getX(q)) / 4, 1 - (cy + 1 - uv.getY(q)) / 2);
+  g.rotateY(rotY); g.translate(x, y, z);
+  list.push(g);
+}
+let graffitiMat = null;
+export function graffitiMesh(list) {
+  graffitiMat = graffitiMat || new THREE.MeshStandardMaterial({ map: TX.graffitiAtlas(), transparent: true, alphaTest: 0.05, roughness: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const m = new THREE.Mesh(mergeGeometries(list), graffitiMat);
+  m.receiveShadow = true;
+  return m;
+}
+
 export function buildAlleyDressing(world, scene, mats) {
   const R = mulberry32(77);
   const metal = [], cloth = [], lamps = [], sky = [];
   const gy = CITY.y + CITY.curb;
   const clothCols = [0xe8e2d4, 0xc8322a, 0x3a6ea8, 0xf0c419, 0x6b8f3a, 0xffffff, 0xd88aa8];
+  const tags = [];
   for (const a of world.alleys) {
     const gy = CITY.at((a.x0 + a.x1) / 2, (a.z0 + a.z1) / 2) + CITY.curb;
     const vertical = a.vertical;
@@ -404,6 +422,18 @@ export function buildAlleyDressing(world, scene, mats) {
           const st = new THREE.BoxGeometry(3.9, 0.05, 0.5); st.rotateZ(Math.atan2(3.4, 3.2) * (R() < 0.5 ? 1 : -1));
           metal.push(part(st, 0x2a2b2d, c, yy + 1.7, wallPos + sign * out * 0.55));
         }
+      }
+    }
+    // graffiti: tags all along the alley walls at spray-can height
+    for (let s = 0; s < 2; s++) for (const b of sideBld[s]) {
+      const wallPos = vertical ? (s ? b.x - b.hx : b.x + b.hx) : (s ? b.z - b.hz : b.z + b.hz);
+      const lo = vertical ? b.z - b.hz : b.x - b.hx, hi = vertical ? b.z + b.hz : b.x + b.hx;
+      const n = Math.floor((hi - lo) / 7) + (R() < 0.6 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const w = 2.2 + R() * 2.6, h = w * (0.45 + R() * 0.1), u = lo + w / 2 + 0.3 + R() * Math.max(0, hi - lo - w - 0.6);
+        const y = gy + 0.35 + h / 2 + R() * 0.7, off = (s ? -1 : 1) * 0.04;
+        const rot = vertical ? (s ? -Math.PI / 2 : Math.PI / 2) : (s ? Math.PI : 0);
+        graffitiQuad(tags, vertical ? wallPos + off : u, y, vertical ? u : wallPos + off, w, h, rot, Math.floor(R() * 8));
       }
     }
     // laundry lines across the alley: shirts, trousers, towels and sheets pegged on a sagging line
@@ -558,6 +588,7 @@ export function buildAlleyDressing(world, scene, mats) {
   };
   add(metal.concat(sky), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.4, side: THREE.DoubleSide }), true);
   add(cloth, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }), true);
+  if (tags.length) scene.add(graffitiMesh(tags));
   mats.alleyLamp = new THREE.MeshStandardMaterial({ color: 0x777066, emissive: 0xffb866, emissiveIntensity: 0.5 });
   add(lamps, mats.alleyLamp, false);
 }
