@@ -1394,6 +1394,136 @@ export class World {
     return this.onRampPath(x, z, m);
   }
 
+  // café parklets: in the kerb strip outside a café, a U of wooden planters round tables and chairs under a big sun roof
+  buildParklets() {
+    const R = this.rand;
+    this.parklets = [];
+    for (const b of this.buildings) {
+      if (!(b.shopKind === 'cafe' || b.shopKind2 === 'cafe') || !b.shop || !b.shop.faces.length || R() < 0.55) continue;
+      const blk = b.blk, [ax, az, bx, bz] = b.shop.faces[0];
+      const alongX = Math.abs(bx - ax) > Math.abs(bz - az);
+      const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+      // which side of the block is the street, and is it an ordinary (non-avenue) street?
+      let curb, sgn;
+      if (alongX) { const up = Math.abs(mz - blk.z0) < Math.abs(mz - blk.z1); curb = up ? blk.z0 : blk.z1; sgn = up ? -1 : 1; if (CITY.hw(up ? blk.j : blk.j + 1) > 7) continue; }
+      else { const lf = Math.abs(mx - blk.x0) < Math.abs(mx - blk.x1); curb = lf ? blk.x0 : blk.x1; sgn = lf ? -1 : 1; if (CITY.vw(lf ? blk.i : blk.i + 1) > 7) continue; }
+      const off = curb + sgn * 1.6; // centre of the kerb strip, 1.6 m out from the kerb
+      const at = (u, v) => (alongX ? [mx + u, off + sgn * v] : [off + sgn * v, mz + u]);
+      const [cx, cz] = at(0, 0);
+      if (this.onRampPath(cx, cz, 4) || this.parklets.some((p) => Math.hypot(p.x - cx, p.z - cz) < 30)) continue;
+      const y = CITY.at(cx, cz);
+      const rot = alongX ? 0 : Math.PI / 2;
+      // planters: two along the traffic side, one at each end
+      for (const u of [-2.6, 2.6]) { const [x, z] = at(u, 1.1); this.addPropBox('planterbox', x, z, y, rot, 1.2, 0.45); }
+      for (const u of [-4.3, 4.3]) { const [x, z] = at(u, -0.1); this.addPropBox('planterbox', x, z, y, rot + Math.PI / 2, 1.2, 0.45); }
+      // tables and chairs underneath, more on the pavement by the window
+      for (const u of [-2.2, 1.0]) { const [x, z] = at(u, -0.2); this.addPropRaw('table', x, z, y, R()); for (const d of [-0.8, 0.8]) { const [qx, qz] = at(u + d, -0.2); this.addPropRaw('chair', qx, qz, y, R() * 6); } }
+      for (const u of [-3, 0, 3]) { const [x, z] = at(u, -3.6); this.addPropRaw('table', x, z, y + CITY.curb, R()); const [qx, qz] = at(u + 0.8, -3.6); this.addPropRaw('chair', qx, qz, y + CITY.curb, R() * 6); }
+      const [tx, tz] = at(0, 0.2);
+      this.addPropRaw(R() < 0.5 ? 'tent' : 'tentgreen', tx, tz, y, rot);
+      this.parklets.push({ x: cx, z: cz });
+    }
+  }
+
+  // somewhere to park: cars lined up along the kerb of some city streets, and gravel lots beside country roads
+  buildRoadsideParking() {
+    const R = this.rand;
+    let kerb = 0;
+    const types = ['sedan', 'sedan', 'compact', 'pickup', 'van', 'taxi'];
+    for (const e of this.edges) {
+      if (e.type !== 'city' || R() > 0.25 || kerb > 60) continue;
+      const P = e.pts, A = P[0], B = P[P.length - 1];
+      const L = Math.hypot(B.x - A.x, B.z - A.z), tx = (B.x - A.x) / L, tz = (B.z - A.z) / L;
+      const side = R() < 0.5 ? -1 : 1, off = (e.halfW - 1.5) * side; // in the kerb strip, clear of the traffic lane
+      for (let t = 20; t < L - 20 && kerb <= 60; t += 6.4) {
+        if (R() < 0.3) continue;
+        const x = A.x + tx * t - tz * off, z = A.z + tz * t + tx * off;
+        if (this.onRampPath(x, z, 2) || this.parklets.some((p) => Math.hypot(p.x - x, p.z - z) < 9) || this.covers && this.covers.some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1)) continue;
+        const heading = Math.atan2(-tx, -tz) + (side > 0 ? 0 : Math.PI);
+        this.parkedCars.push({ x, z, y: CITY.at(x, z), heading, type: types[Math.floor(R() * types.length)], kerb: true });
+        kerb++;
+      }
+    }
+    // country: flat gravel pull-offs beside the road with a few cars
+    let lots = 0;
+    for (const e of this.edges) {
+      if (e.city || e.elev || e.type === 'highway' || e.type === 'mountain' || lots >= 14) continue;
+      for (let i = 30; i < e.pts.length - 30 && lots < 14; i += 35) {
+        if (R() > 0.4) continue;
+        const p = e.pts[i], q = e.pts[i + 3], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, tx = (q.x - p.x) / L, tz = (q.z - p.z) / L;
+        const side = R() < 0.5 ? -1 : 1, off = e.halfW + 9;
+        const cx = p.x - tz * off * side, cz = p.z + tx * off * side;
+        const hs = [[-14, -6], [14, -6], [-14, 6], [14, 6], [0, 0]].map(([u, v]) => this.terrainHeight(cx + tx * u - tz * v * side, cz + tz * u + tx * v * side));
+        if (Math.max(...hs) - Math.min(...hs) > 2.2 || this.houseOverlaps(cx, cz, 16) || this.excluded(cx, cz, 4) || this.sampleGrid(this.waterDist, cx, cz) < 12) continue;
+        // gravel surface
+        for (let u = -15; u <= 15; u += CELL) for (let v = -7; v <= 7; v += CELL) {
+          const x = cx + tx * u - tz * v * side, z = cz + tz * u + tx * v * side;
+          const k = Math.round((z + HALF) / CELL) * NV + Math.round((x + HALF) / CELL);
+          if (k >= 0 && k < this.surf.length) this.surf[k] = SURF.DIRT;
+        }
+        const n = 2 + Math.floor(R() * 4);
+        for (let k = 0; k < n; k++) {
+          const u = -11 + k * 5.2, x = cx + tx * u, z = cz + tz * u;
+          this.parkedCars.push({ x, z, y: this.terrainHeight(x, z), heading: Math.atan2(-tz, tx) + (R() < 0.5 ? 0 : Math.PI) + (R() - 0.5) * 0.15, type: types[Math.floor(R() * types.length)] });
+        }
+        this.excl.push({ x0: cx - 16, x1: cx + 16, z0: cz - 16, z1: cz + 16 });
+        lots++;
+      }
+    }
+    this.roadsideLots = lots; this.kerbCars = kerb;
+  }
+
+  // fenced sheep paddocks and chicken runs on open, gentle grass near the country roads and villages.
+  // Every fence piece is a breakable prop: smash one and the animals can get out.
+  buildPaddocks() {
+    const R = this.rand;
+    this.paddocks = [];
+    const tryPlace = (kind, cx, cz) => {
+      const hx = kind === 'sheep' ? 18 + R() * 8 : 6 + R() * 2, hz = kind === 'sheep' ? 13 + R() * 6 : 4.5 + R() * 1.5;
+      const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]].map(([a, b]) => [cx + a * (hx + 2), cz + b * (hz + 2)]);
+      const hs = corners.map(([x, z]) => this.terrainHeight(x, z));
+      if (Math.max(...hs) - Math.min(...hs) > (kind === 'sheep' ? 7 : 2.2)) return false; // gentle ground only
+      for (const [x, z] of corners) {
+        if (this.inCityRect(x, z, 150) || this.roadDistance(x, z) < 6 || this.sampleGrid(this.waterDist, x, z) < 15) return false;
+        if (this.sampleGrid(this.forest, x, z) > 0.25 || this.houseOverlaps(x, z, 12) || this.excluded(x, z, 2)) return false;
+        if (this.terrainHeight(x, z) > 160) return false;
+      }
+      if (this.paddocks.some((p) => Math.abs(p.cx - cx) < p.hx + hx + 25 && Math.abs(p.cz - cz) < p.hz + hz + 25)) return false;
+      const pad = { kind, cx, cz, hx, hz, segs: [] };
+      // fence: 4 m pieces round the edge (posts and rails for sheep, a low picket run for the chickens)
+      for (const [side, ax, az, bx, bz] of [['n', cx - hx, cz - hz, cx + hx, cz - hz], ['s', cx - hx, cz + hz, cx + hx, cz + hz], ['w', cx - hx, cz - hz, cx - hx, cz + hz], ['e', cx + hx, cz - hz, cx + hx, cz + hz]]) {
+        const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(L / 4));
+        for (let k = 0; k < n; k++) {
+          const t0 = k / n, t1 = (k + 1) / n, x = ax + (bx - ax) * (t0 + t1) / 2, z = az + (bz - az) * (t0 + t1) / 2;
+          const rot = side === 'n' || side === 's' ? 0 : -Math.PI / 2;
+          const prop = this.addPropBox(kind === 'sheep' ? 'railfence' : 'fence', x, z, this.terrainHeight(x, z), rot, L / n / 2, 0.12);
+          pad.segs.push({ side, a: (side === 'n' || side === 's') ? ax + (bx - ax) * t0 : az + (bz - az) * t0, b: (side === 'n' || side === 's') ? ax + (bx - ax) * t1 : az + (bz - az) * t1, prop });
+        }
+      }
+      // keep trees and other clutter out
+      this.excl.push({ x0: cx - hx - 1, x1: cx + hx + 1, z0: cz - hz - 1, z1: cz + hz + 1 });
+      this.paddocks.push(pad);
+      return true;
+    };
+    // candidates: points beside country roads (so you actually drive past them), more around the farms and villages
+    const cands = [];
+    for (const e of this.edges) {
+      if (e.city || e.elev || e.type === 'highway' || e.type === 'mountain') continue;
+      for (let i = 10; i < e.pts.length - 10; i += 12) {
+        const p = e.pts[i], q = e.pts[i + 1], L = Math.hypot(q.x - p.x, q.z - p.z) || 1;
+        const side = R() < 0.5 ? -1 : 1, off = e.halfW + 30 + R() * 25;
+        cands.push([p.x - ((q.z - p.z) / L) * off * side, p.z + ((q.x - p.x) / L) * off * side]);
+      }
+    }
+    for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
+    let sheep = 0, hens = 0;
+    for (const [x, z] of cands) {
+      if (sheep < 16 && tryPlace('sheep', x, z)) sheep++;
+      else if (hens < 12 && R() < 0.5 && tryPlace('chicken', x, z)) hens++;
+      if (sheep >= 16 && hens >= 12) break;
+    }
+  }
+
   // is (x,z) on the low part of an expressway ramp (where it leaves the street)? keep furniture off it
   onRampPath(x, z, m = 0) {
     if (!this._rampBoxes) {
@@ -1829,18 +1959,36 @@ export class World {
     this.colliders.push({ type: 'circle', x, z, r: 0.2, top: y + 8, breakable: true, ref: lamp });
   }
 
+  // private homes in a handful of deliberate styles, each with its own proportions, roof and colours
   addHouse(x, z, rot, y, suburban = false) {
     const R = this.rand;
-    const w = 9 + R() * 5, d = 8 + R() * 4;
-    const h = 3.2 + (R() < 0.45 ? 3 : 0);
-    const palette = [0xe8dcc4, 0xd8c6a5, 0xbfc8c9, 0xe2b98f, 0xc9d5b9, 0xf0e6d6, 0xa9b8c7, 0xd9a68a, 0xb8a089];
-    const roofPal = [0x6b3a2e, 0x4a4a52, 0x7a4b36, 0x3d4a5a, 0x5c3b30];
+    const pick = (arr) => arr[Math.floor(R() * arr.length)];
+    const nearFarm = this.surf[Math.round((z + HALF) / CELL) * NV + Math.round((x + HALF) / CELL)] === SURF.FIELD || Math.hypot(x + 950, z - 1150) < 400; // fields, or Harlow farm country
+    const r = R();
+    const style = nearFarm && r < 0.3 ? 'barn' : r < 0.24 ? 'cottage' : r < 0.42 ? 'farmhouse' : r < 0.6 ? 'bungalow' : r < 0.76 ? 'colonial' : r < 0.9 ? 'modern' : 'cottage';
+    const S = {
+      cottage: { w: [8, 10], d: [7, 8.5], h: 3.3, roof: [3.2, 3.8], walls: [0xf0e6d6, 0xe8dcc4, 0xdfe6dc, 0xf2e2d0, 0xe6d5c3], roofs: [0x4a4a52, 0x6b3a2e, 0x3d4a5a], trim: 0xf6f3ec, accent: [0x3f6b4a, 0x2f5a8a, 0x8a3a2a] },
+      farmhouse: { w: [11, 14], d: [8, 9.5], h: 6.3, roof: [2.6, 3.2], walls: [0xf4f1ea, 0xf0e6c8, 0xdfe3d4], roofs: [0x4a4f55, 0x5c3b30, 0x3a3f44], trim: 0xffffff, accent: [0x2f3a44, 0x8a3a2a, 0x3f6b4a] },
+      bungalow: { w: [12, 15], d: [9, 11], h: 3.3, roof: [1.9, 2.4], walls: [0xd9c4a0, 0xc9d5b9, 0xb8a089, 0xd9a68a, 0xe2d2b6], roofs: [0x5c3b30, 0x6b4a36, 0x4a4a52], trim: 0xf0ece0, accent: [0x6b4a2e, 0x2f5a8a, 0x3f6b4a] },
+      colonial: { w: [12, 14], d: [8, 9], h: 6.4, roof: [2.6, 3.0], walls: [0x8a3b2c, 0x9a4632, 0xf0ece0, 0xe8e2d4], roofs: [0x3a3f44, 0x2e3238], trim: 0xffffff, accent: [0x1a1a1a, 0x1f2f44] },
+      modern: { w: [11, 14], d: [9, 11], h: R() < 0.5 ? 3.4 : 6.6, roof: [0.6, 0.6], walls: [0xf2f2ee, 0x3a3d40, 0xe6e4de], roofs: [0x2a2c2e], trim: 0x2a2c2e, accent: [0x9a6b3c, 0xb07a44] },
+      barn: { w: [10, 12], d: [8, 10], h: 3.4, roof: [3.6, 4.2], walls: [0x8a2a1e, 0x9a3222, 0x7a5a3a], roofs: [0x3a3f44, 0x4a4f55], trim: 0xf6f3ec, accent: [0xf6f3ec] },
+    }[style];
+    const rng = (a) => a[0] + R() * (a[1] - a[0]);
+    const w = rng(S.w), d = rng(S.d), h = S.h;
     const house = {
-      x, z, rot, y, w, d, h, roofH: 2.2 + R() * 1.6,
-      color: palette[Math.floor(R() * palette.length)], roof: roofPal[Math.floor(R() * roofPal.length)], suburban,
+      x, z, rot, y, w, d, h, roofH: rng(S.roof), style,
+      color: pick(S.walls), roof: pick(S.roofs), trim: S.trim, accent: pick(S.accent), suburban,
+      chimney: style !== 'modern' && R() < 0.75, dormers: style === 'cottage' ? 1 + Math.floor(R() * 2) : 0, shutters: style === 'cottage' || style === 'colonial' || (style === 'farmhouse' && R() < 0.5),
+      flowers: style === 'cottage' || R() < 0.3, seed: Math.floor(R() * 1e6),
     };
+    if (house.color === 0x3a3d40) house.trim = 0xf2f2ee; // dark modern box: light trim
     this.houses.push(house);
     this.colliders.push({ type: 'box', x, z, hx: w / 2, hz: d / 2, c: Math.cos(rot), s: -Math.sin(rot), top: y + h + house.roofH, tall: true });
+    if (style === 'farmhouse') { // the porch roof posts stop you too
+      const [px, pz] = this.houseToWorld(house, 0, d / 2 + 1.3);
+      this.colliders.push({ type: 'box', x: px, z: pz, hx: w / 2 - 0.5, hz: 1.2, c: Math.cos(rot), s: -Math.sin(rot), top: y + 3.2, bottom: y + 2.8, tall: true });
+    }
     return house;
   }
 
@@ -2068,7 +2216,7 @@ export class World {
       shelf: { r: 1.0, slow: 0.95 }, fridge: { r: 0.7, slow: 0.93 }, counter: { r: 1.0, slow: 0.92 },
       tire: { r: 0.45, slow: 0.98 }, bench: { r: 0.8, slow: 0.97 }, bike: { r: 0.6, slow: 0.99 },
       busstop: { r: 1.4, slow: 0.9 }, phone: { r: 0.6, slow: 0.93 }, meter: { r: 0.15, slow: 0.995 }, mailbox: { r: 0.35, slow: 0.97 },
-      sign: { r: 0.15, slow: 0.995 }, chevron: { r: 0.35, slow: 0.99 },
+      sign: { r: 0.15, slow: 0.995 }, chevron: { r: 0.35, slow: 0.99 }, tent: { r: 1.6, slow: 0.9 }, tentgreen: { r: 1.6, slow: 0.9 },
     }[kind];
     if (this._cityProps && this.inCityRect(x, z, 6)) y = CITY.at(x, z) + CITY.curb;
     const p = { kind, x, z, y, rot, broken: false, brokenT: 0 };
@@ -2252,6 +2400,9 @@ export class World {
       }
     }
     this._cityProps = false;
+    this.buildPaddocks();
+    this.buildParklets();
+    this.buildRoadsideParking();
     // guardrails on the drop side of the mountain roads (breakable: you can go over).
     // On the big mountain they have gaps: nothing between you and the chasm.
     for (const e of this.edges) {

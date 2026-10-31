@@ -84,6 +84,35 @@ export class AudioEngine {
     this.enabled = true;
   }
 
+  // farm animals: a wobbly bleat, or a few clucks (higher and quicker when spooked)
+  animal(kind, vol, scared) {
+    if (!this.enabled || this.muted || vol < 0.03) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.01;
+    const out = ctx.createGain(); out.gain.value = vol * 0.5; out.connect(this.master);
+    if (kind === 'sheep') {
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = 'sawtooth'; const f0 = (scared ? 300 : 230) + Math.random() * 50;
+      o.frequency.setValueAtTime(f0, t0); o.frequency.linearRampToValueAtTime(f0 * 0.85, t0 + 0.7);
+      lfo.frequency.value = 7 + Math.random() * 3; lg.gain.value = f0 * 0.06; lfo.connect(lg).connect(o.frequency);
+      const f1 = ctx.createBiquadFilter(); f1.type = 'bandpass'; f1.frequency.value = 850; f1.Q.value = 3;
+      const f2 = ctx.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 1500; f2.Q.value = 4;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.5, t0 + 0.06); g.gain.setValueAtTime(0.45, t0 + 0.45); g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.75);
+      o.connect(f1).connect(g); o.connect(f2).connect(g); g.connect(out);
+      o.start(t0); lfo.start(t0); o.stop(t0 + 0.8); lfo.stop(t0 + 0.8);
+    } else {
+      const n = scared ? 5 : 2 + Math.floor(Math.random() * 3);
+      for (let k = 0; k < n; k++) {
+        const t = t0 + k * (scared ? 0.09 : 0.16) + Math.random() * 0.03;
+        const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        o.type = 'square'; const f0 = (scared ? 950 : 720) + Math.random() * 120;
+        o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + 0.07);
+        f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 2;
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.008); g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+        o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + 0.1);
+      }
+    }
+  }
+
   // loot pickup: bright little arpeggio (longer and shinier for gold)
   pickup(gold) {
     if (!this.enabled || this.muted) return;

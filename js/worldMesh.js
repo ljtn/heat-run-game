@@ -670,28 +670,151 @@ export function buildWorldMeshes(world, scene) {
     const gb = getB(houseB, h.x, h.z, true);
     const wl = getB(winLitB, h.x, h.z, false), wd = getB(winDarkB, h.x, h.z, false);
     const start = gb.count, ws = wl.count, wds = wd.count;
-    const wall = lin(h.color), roof = lin(h.roof);
-    const hw = h.w / 2, hd = h.d / 2, H0 = 0, H1 = h.h, rh = h.roofH, o = 0.5;
+    const wall = lin(h.color), roof = lin(h.roof), trim = lin(h.trim || 0xf0ece0), accent = lin(h.accent || 0x6b4a2e);
+    const hw = h.w / 2, hd = h.d / 2, H1 = h.h, rh = h.roofH, o = 0.5, st = h.style || 'cottage';
+    const hr = mulberry32(h.seed || 1);
+    const brick = lin(0x7b5546), glassDark = null;
     gb.box(0, 0, hw + 0.05, hd + 0.05, -3.5, 0.35, 1, 1, false, foundation); // deep plinth for sloping plots
     gb.box(0, 0, hw, hd, 0.35, H1, 1, 1, false, wall);
-    gb.quad([-hw - o, H1 - 0.15, hd + o], [hw + o, H1 - 0.15, hd + o], [hw + o, H1 + rh, 0], [-hw - o, H1 + rh, 0], null, roof);
-    gb.quad([hw + o, H1 - 0.15, -hd - o], [-hw - o, H1 - 0.15, -hd - o], [-hw - o, H1 + rh, 0], [hw + o, H1 + rh, 0], null, roof);
-    gb.tri([hw, H1, hd], [hw, H1, -hd], [hw, H1 + rh, 0], null, wall);
-    gb.tri([-hw, H1, -hd], [-hw, H1, hd], [-hw, H1 + rh, 0], null, wall);
-    if (R() < 0.6) gb.box(hw * 0.5, -hd * 0.3, 0.45, 0.45, H1, H1 + rh + 0.9, 1, 1, true, chimney);
-    // door
-    gb.quad([-0.55, 0.35, hd + 0.03], [0.55, 0.35, hd + 0.03], [0.55, 2.45, hd + 0.03], [-0.55, 2.45, hd + 0.03], null, doorCol);
-    const floors = H1 > 5 ? 2 : 1;
-    const lit = R() < 0.55;
-    for (let f = 0; f < floors; f++) {
-      const y0 = 1.2 + f * 3, y1 = y0 + 1.3;
-      const tgt = () => (lit && R() < 0.75 ? wl : wd);
-      for (const xw of [-hw * 0.55, hw * 0.55]) {
-        tgt().quad([xw - 0.7, y0, hd + 0.03], [xw + 0.7, y0, hd + 0.03], [xw + 0.7, y1, hd + 0.03], [xw - 0.7, y1, hd + 0.03]);
-        tgt().quad([xw + 0.7, y0, -hd - 0.03], [xw - 0.7, y0, -hd - 0.03], [xw - 0.7, y1, -hd - 0.03], [xw + 0.7, y1, -hd - 0.03]);
+    // ---- face helper: (u along the face, v up) -> local point, CCW seen from outside ----
+    const F = {
+      f: (u, v, off = 0) => [u, v, hd + off], b: (u, v, off = 0) => [-u, v, -hd - off],
+      r: (u, v, off = 0) => [hw + off, v, -u], l: (u, v, off = 0) => [-hw - off, v, u],
+    };
+    const faceW = { f: hw, b: hw, r: hd, l: hd };
+    const rect = (bld, face, u0, v0, u1, v1, off, col) => { const P = F[face]; bld.quad(P(u0, v0, off), P(u1, v0, off), P(u1, v1, off), P(u0, v1, off), null, col); };
+    // a slab standing proud of a face: front plus its four edges
+    const slab = (face, u0, v0, u1, v1, d0, d1, col) => {
+      const P = F[face];
+      gb.quad(P(u0, v0, d1), P(u1, v0, d1), P(u1, v1, d1), P(u0, v1, d1), null, col);
+      gb.quad(P(u0, v1, d0), P(u0, v1, d1), P(u1, v1, d1), P(u1, v1, d0), null, col);
+      gb.quad(P(u0, v0, d1), P(u0, v0, d0), P(u1, v0, d0), P(u1, v0, d1), null, col);
+      gb.quad(P(u0, v0, d0), P(u0, v0, d1), P(u0, v1, d1), P(u0, v1, d0), null, col);
+      gb.quad(P(u1, v0, d1), P(u1, v0, d0), P(u1, v1, d0), P(u1, v1, d1), null, col);
+    };
+    const lit = hr() < 0.55;
+    const glass = () => (lit && hr() < 0.75 ? wl : wd);
+    // a proper window: frame, glazing bars, sill, maybe shutters and a flower box
+    const win = (face, u, v0, ww, wh, opts = {}) => {
+      const g = glass(), P = F[face];
+      g.quad(P(u - ww / 2, v0, 0.02), P(u + ww / 2, v0, 0.02), P(u + ww / 2, v0 + wh, 0.02), P(u - ww / 2, v0 + wh, 0.02));
+      const t = 0.09;
+      slab(face, u - ww / 2 - t, v0 - t, u + ww / 2 + t, v0, 0, 0.07, trim); // bottom frame
+      slab(face, u - ww / 2 - t, v0 + wh, u + ww / 2 + t, v0 + wh + t, 0, 0.07, trim); // head
+      slab(face, u - ww / 2 - t, v0, u - ww / 2, v0 + wh, 0, 0.07, trim);
+      slab(face, u + ww / 2, v0, u + ww / 2 + t, v0 + wh, 0, 0.07, trim);
+      if (!opts.picture) { slab(face, u - 0.025, v0, u + 0.025, v0 + wh, 0, 0.05, trim); slab(face, u - ww / 2, v0 + wh * 0.55 - 0.025, u + ww / 2, v0 + wh * 0.55 + 0.025, 0, 0.05, trim); }
+      slab(face, u - ww / 2 - 0.16, v0 - t - 0.06, u + ww / 2 + 0.16, v0 - t, 0, 0.14, trim); // sill
+      if (opts.shutters) for (const sd of [-1, 1]) slab(face, u + sd * (ww / 2 + 0.12), v0, u + sd * (ww / 2 + 0.12 + ww * 0.42), v0 + wh, 0, 0.05, accent);
+      if (opts.flowers) {
+        slab(face, u - ww / 2, v0 - 0.42, u + ww / 2, v0 - 0.16, 0, 0.3, lin(0x7a5532));
+        for (let k = 0; k < 6; k++) { const fu = u - ww / 2 + 0.15 + (k * (ww - 0.3)) / 5; slab(face, fu - 0.07, v0 - 0.16, fu + 0.07, v0 - 0.02, 0.08, 0.24, lin([0xd8324a, 0xf2c14a, 0xf0f0f0, 0xe87a2a][k % 4])); }
       }
-      tgt().quad([hw + 0.03, y0, 0.7], [hw + 0.03, y0, -0.7], [hw + 0.03, y1, -0.7], [hw + 0.03, y1, 0.7]);
-      tgt().quad([-hw - 0.03, y0, -0.7], [-hw - 0.03, y0, 0.7], [-hw - 0.03, y1, 0.7], [-hw - 0.03, y1, -0.7]);
+    };
+    // ---- roof by style ----
+    const fascia = (y) => { gb.box(0, 0, hw + o, hd + o, y - 0.22, y, 1, 1, false, trim); };
+    if (st === 'modern') {
+      gb.top(-hw, -hd, hw, hd, H1, 1 / 10, roof);
+      gb.box(0, 0, hw + 0.15, hd + 0.15, H1, H1 + 0.6, 1, 1, false, trim); // parapet
+      // cantilevered canopy over the entrance, and a wood-clad panel
+      gb.box(-hw * 0.35, hd + 1.1, hw * 0.45, 1.2, 2.7, 2.9, 1, 1, true, trim);
+      slab('f', hw * 0.15, 0.35, hw * 0.95, H1, 0, 0.06, accent);
+      for (let k = 0; k < 7; k++) slab('f', hw * 0.15 + k * hw * 0.115, 0.35, hw * 0.15 + k * hw * 0.115 + 0.03, H1, 0.06, 0.08, lin(0x6b4a2e));
+    } else if (st === 'bungalow') {
+      // hipped roof: ridge along the long side
+      const rl = Math.max(0.5, hw - hd);
+      const E = [[-hw - o, -hd - o], [hw + o, -hd - o], [hw + o, hd + o], [-hw - o, hd + o]], Y = H1 - 0.15, T = H1 + rh;
+      gb.quad([E[3][0], Y, E[3][1]], [E[2][0], Y, E[2][1]], [rl, T, 0], [-rl, T, 0], null, roof);
+      gb.quad([E[1][0], Y, E[1][1]], [E[0][0], Y, E[0][1]], [-rl, T, 0], [rl, T, 0], null, roof);
+      gb.tri([E[2][0], Y, E[2][1]], [E[1][0], Y, E[1][1]], [rl, T, 0], null, roof);
+      gb.tri([E[0][0], Y, E[0][1]], [E[3][0], Y, E[3][1]], [-rl, T, 0], null, roof);
+      fascia(H1 - 0.1);
+    } else if (st === 'barn') {
+      // gambrel: steep lower slopes, shallow upper ones
+      const kz = hd * 0.55, ky = H1 + rh * 0.62, T = H1 + rh;
+      for (const s of [1, -1]) {
+        const a = [-hw - o, H1 - 0.15, s * (hd + o)], b = [hw + o, H1 - 0.15, s * (hd + o)], c = [hw + o, ky, s * kz], d = [-hw - o, ky, s * kz], e = [hw + o, T, 0], f = [-hw - o, T, 0];
+        if (s > 0) { gb.quad(a, b, c, d, null, roof); gb.quad(d, c, e, f, null, roof); } else { gb.quad(b, a, d, c, null, roof); gb.quad(c, d, f, e, null, roof); }
+      }
+      for (const s of [1, -1]) { // gable ends (pentagon), with white trim crosses on the barn doors below
+        const x = s * hw;
+        const pts = [[x, H1, hd], [x, ky, kz], [x, T, 0], [x, ky, -kz], [x, H1, -hd]];
+        for (let k = 1; k < 4; k++) s > 0 ? gb.tri(pts[0], pts[k + 1], pts[k], null, wall) : gb.tri(pts[0], pts[k], pts[k + 1], null, wall);
+      }
+      slab('f', -1.6, 0.35, 1.6, 3.0, 0, 0.06, lin(0x7a2418));
+      for (const [u0, v0, u1, v1] of [[-1.6, 0.35, -1.45, 3.0], [1.45, 0.35, 1.6, 3.0], [-1.6, 2.85, 1.6, 3.0], [-1.6, 1.6, 1.6, 1.75]]) slab('f', u0, v0, u1, v1, 0.06, 0.1, trim);
+    } else {
+      // gable (ridge along x)
+      gb.quad([-hw - o, H1 - 0.15, hd + o], [hw + o, H1 - 0.15, hd + o], [hw + o, H1 + rh, 0], [-hw - o, H1 + rh, 0], null, roof);
+      gb.quad([hw + o, H1 - 0.15, -hd - o], [-hw - o, H1 - 0.15, -hd - o], [-hw - o, H1 + rh, 0], [hw + o, H1 + rh, 0], null, roof);
+      gb.tri([hw, H1, hd], [hw, H1, -hd], [hw, H1 + rh, 0], null, wall);
+      gb.tri([-hw, H1, -hd], [-hw, H1, hd], [-hw, H1 + rh, 0], null, wall);
+      fascia(H1 - 0.1);
+      // cottage dormers poking out of the front slope
+      for (let k = 0; k < (h.dormers || 0); k++) {
+        const u = h.dormers === 1 ? 0 : (k ? 1 : -1) * hw * 0.45, z0 = hd * 0.25, yb = H1 + rh * (1 - z0 / (hd + o)) * 0.35;
+        gb.box(u, z0 + 0.6, 0.85, 0.65, yb - 0.6, yb + 1.25, 1, 1, false, wall);
+        gb.quad([u - 1.05, yb + 1.15, z0 + 1.35], [u + 1.05, yb + 1.15, z0 + 1.35], [u, yb + 1.8, z0 + 1.35], [u, yb + 1.8, z0 + 1.35], null, roof);
+        gb.quad([u - 1.05, yb + 1.15, z0 + 1.35], [u, yb + 1.8, z0 + 1.35], [u, yb + 1.8, z0 - 0.2], [u - 1.05, yb + 1.15, z0 - 0.2], null, roof);
+        gb.quad([u, yb + 1.8, z0 + 1.35], [u + 1.05, yb + 1.15, z0 + 1.35], [u + 1.05, yb + 1.15, z0 - 0.2], [u, yb + 1.8, z0 - 0.2], null, roof);
+        const g = glass(); g.quad([u - 0.5, yb, z0 + 1.27], [u + 0.5, yb, z0 + 1.27], [u + 0.5, yb + 0.95, z0 + 1.27], [u - 0.5, yb + 0.95, z0 + 1.27]);
+      }
+    }
+    // chimneys: brick with a cap (colonial: one each end)
+    if (h.chimney) {
+      const spots = st === 'colonial' ? [[-hw + 0.6, 0], [hw - 0.6, 0]] : [[hw * 0.5, -hd * 0.3]];
+      for (const [cx, cz] of spots) { gb.box(cx, cz, 0.42, 0.42, H1, H1 + rh + 1.0, 1, 1, false, brick); gb.box(cx, cz, 0.52, 0.52, H1 + rh + 1.0, H1 + rh + 1.18, 1, 1, true, lin(0x5a5752)); }
+    }
+    // corner boards
+    if (st !== 'modern') for (const [cx, cz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]]) gb.box(cx, cz, 0.11, 0.11, 0.35, H1, 1, 1, false, trim);
+    // ---- door with frame, step, and a porch / portico / canopy by style ----
+    const doorU = st === 'colonial' ? 0 : st === 'modern' ? -hw * 0.35 : hw > 6 && hr() < 0.5 ? -hw * 0.3 : 0;
+    rect(gb, 'f', doorU - 0.55, 0.35, doorU + 0.55, 2.45, 0.03, st === 'modern' ? lin(0x3a2a1c) : accent);
+    for (const [u0, v0, u1, v1] of [[doorU - 0.7, 0.35, doorU - 0.55, 2.6], [doorU + 0.55, 0.35, doorU + 0.7, 2.6], [doorU - 0.7, 2.45, doorU + 0.7, 2.6]]) slab('f', u0, v0, u1, v1, 0, 0.08, trim);
+    gb.box(doorU, hd + 0.5, 0.9, 0.5, 0, 0.35, 1, 1, true, lin(0x9a958c)); // step
+    if (st === 'farmhouse') {
+      // full-width front porch: deck, columns, rail, and its own roof
+      gb.box(0, hd + 1.3, hw - 0.3, 1.3, 0.1, 0.45, 1, 1, true, lin(0x8a7a66));
+      for (let k = 0; k <= 4; k++) { const u = -hw + 0.6 + (k * (h.w - 1.2)) / 4; gb.box(u, hd + 2.4, 0.11, 0.11, 0.45, 2.85, 1, 1, false, trim); }
+      gb.box(-hw * 0.55, hd + 2.4, hw * 0.4, 0.05, 1.25, 1.33, 1, 1, true, trim); gb.box(hw * 0.55, hd + 2.4, hw * 0.4, 0.05, 1.25, 1.33, 1, 1, true, trim);
+      gb.quad([-hw + 0.1, 2.85, hd + 2.7], [hw - 0.1, 2.85, hd + 2.7], [hw - 0.1, 3.35, hd], [-hw + 0.1, 3.35, hd], null, roof);
+      gb.quad([hw - 0.1, 2.7, hd + 2.7], [-hw + 0.1, 2.7, hd + 2.7], [-hw + 0.1, 2.85, hd + 2.7], [hw - 0.1, 2.85, hd + 2.7], null, trim);
+    } else if (st === 'colonial') {
+      // portico: two columns and a pediment over the door
+      for (const sd of [-1, 1]) gb.box(doorU + sd * 1.2, hd + 1.3, 0.13, 0.13, 0.35, 2.95, 1, 1, false, trim);
+      gb.box(doorU, hd + 0.75, 1.55, 0.75, 2.95, 3.15, 1, 1, true, trim);
+      gb.quad([doorU - 1.55, 3.15, hd + 1.5], [doorU + 1.55, 3.15, hd + 1.5], [doorU, 3.85, hd + 1.5], [doorU, 3.85, hd + 1.5], null, trim);
+      gb.quad([doorU - 1.6, 3.12, hd + 1.55], [doorU, 3.9, hd + 1.55], [doorU, 3.9, hd], [doorU - 1.6, 3.12, hd], null, roof);
+      gb.quad([doorU, 3.9, hd + 1.55], [doorU + 1.6, 3.12, hd + 1.55], [doorU + 1.6, 3.12, hd], [doorU, 3.9, hd], null, roof);
+    } else if (st === 'cottage' || st === 'bungalow') {
+      gb.box(doorU, hd + 0.55, 0.95, 0.55, 2.7, 2.82, 1, 1, true, trim); // little canopy
+      for (const sd of [-1, 1]) gb.box(doorU + sd * 0.85, hd + 0.9, 0.04, 0.04, 2.0, 2.72, 1, 1, false, trim);
+    }
+    // ---- windows: laid out per face and floor, with style-specific sizes ----
+    const floors = H1 > 5 ? 2 : 1;
+    const ww = st === 'modern' ? 2.4 : st === 'bungalow' ? 1.7 : 1.15, wh = st === 'modern' ? (floors > 1 ? 2.1 : 2.2) : 1.35;
+    const opts = { shutters: h.shutters, flowers: h.flowers, picture: st === 'modern' };
+    for (let f = 0; f < floors; f++) {
+      const v0 = (st === 'modern' ? 0.5 : 1.05) + f * 3.05;
+      for (const face of ['f', 'b', 'r', 'l']) {
+        const W = faceW[face];
+        const n = face === 'f' || face === 'b' ? Math.max(2, Math.floor((W * 2 - 1.5) / (ww + 1.6))) : Math.max(1, Math.floor((W * 2 - 1.5) / (ww + 2.2)));
+        for (let k = 0; k < n; k++) {
+          const u = -W + (W * 2 * (k + 0.5)) / n;
+          if (face === 'f' && f === 0 && Math.abs(u - doorU) < ww / 2 + 0.95) continue; // leave room for the door
+          if (st === 'modern' && face === 'f' && u > hw * 0.1) continue; // the wood-clad panel
+          win(face, u, v0, ww, wh, face === 'f' ? opts : { shutters: opts.shutters, picture: opts.picture });
+        }
+      }
+    }
+    // a paved path from the front step toward the road, hugging the ground
+    {
+      const pl = Math.max(2, Math.min(9, (h.roadGap || 10) - hd - 2)), c = Math.cos(h.rot), sn = Math.sin(h.rot);
+      const W = (lx, lz) => { const x = h.x + lx * c + lz * sn, z = h.z - lx * sn + lz * c; return [x, world.terrainHeight(x, z) + 0.09, z]; };
+      for (let k = 0; k < pl; k += 1) {
+        const za = hd + 1 + k, zb = Math.min(hd + 1 + pl, za + 1);
+        drive.quad(W(doorU - 0.6, za), W(doorU + 0.6, za), W(doorU + 0.6, zb), W(doorU - 0.6, zb), [[0, k * 0.6], [0.5, k * 0.6], [0.5, k * 0.6 + 0.6], [0, k * 0.6 + 0.6]]);
+      }
     }
     gb.transformFrom(start, h.rot, h.x, h.y, h.z);
     if (h.garage) {

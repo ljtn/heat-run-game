@@ -273,6 +273,11 @@ export class Vehicle {
     const q = this.quat;
     this.forward(_fwd); this.right(_right); this.upv(_up);
     const F = this.force.set(0, -G * this.mass, 0);
+    // keep the car planted: a little speed-dependent downforce, and heavier while all four wheels are off the
+    // ground so crests and kerbs give short hops instead of floaty flights (real ramp jumps still fly)
+    const v2 = this.vel.x * this.vel.x + this.vel.z * this.vel.z;
+    F.y -= this.mass * G * 0.22 * Math.min(1.6, v2 / 900);
+    if (!this.wheels.some((w) => w.contact)) F.y -= this.mass * G * (this.vel.y > 0 ? 0.55 : 0.3);
     const T = this.torque.set(0, 0, 0);
 
     // ---- drivetrain ----
@@ -366,7 +371,7 @@ export class Vehicle {
       cv = Math.max(-2.5, Math.min(2.5, cv));
       let Fs = w.k * w.comp + (cv > 0 ? spec.cBump : spec.cReb) * cv;
       const lMin = spec.L0 - spec.travel;
-      if (l < lMin) Fs += 140000 * (lMin - l) + 4000 * Math.max(0, cv);
+      if (l < lMin) Fs += 70000 * (lMin - l) + 14000 * Math.max(0, cv); // bump stop soaks the hit up rather than springing it back
       w.Fs = Fs;
       w.contactPos.copy(mw).addScaledVector(_up, -t);
     }

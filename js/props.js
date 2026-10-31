@@ -78,6 +78,29 @@ function geometries() {
   for (let k = 0; k < 13; k++) pick.push(box(0.1, 1.05, 0.03, 0xf0ece0, -1.9 + k * 0.316, 0.52, 0.04));
   for (const x of [-1.98, 1.98]) pick.push(box(0.1, 1.15, 0.1, 0xd8d2c4, x, 0.57, 0));
   G.fence = mergeGeometries(pick);
+  // farm fence: posts and three rails
+  const rails = [];
+  for (const x of [-1.95, 0, 1.95]) rails.push(box(0.13, 1.2, 0.13, 0x6b4a2e, x, 0.6, 0));
+  for (const y of [0.35, 0.7, 1.05]) rails.push(box(4.0, 0.1, 0.05, 0x7d5a38, 0, y, 0.07));
+  G.railfence = mergeGeometries(rails);
+  // café parklet planter: slatted wooden box with turf, shrubs and flowers
+  const pb = [box(2.4, 0.8, 0.9, 0x9a7146, 0, 0.4, 0)];
+  for (let k = 0; k < 5; k++) pb.push(box(2.42, 0.02, 0.92, 0x7a5532, 0, 0.12 + k * 0.16, 0));
+  pb.push(box(2.3, 0.06, 0.8, 0x4f7a30, 0, 0.81, 0));
+  for (let k = 0; k < 4; k++) pb.push(part(new THREE.IcosahedronGeometry(0.26, 0), 0x3f6b2a, -0.85 + k * 0.57, 1.0, (k % 2) * 0.16 - 0.08));
+  for (let k = 0; k < 7; k++) pb.push(box(0.09, 0.09, 0.09, [0xd8324a, 0xf2c14a, 0xf0f0f0, 0xe87a2a][k % 4], -1.0 + k * 0.33, 1.12 + (k % 2) * 0.08, 0.2 - (k % 3) * 0.15));
+  G.planterbox = mergeGeometries(pb);
+  // big market-tent sun roof over the tables, with a string of lights round the valance
+  const tent = (roofCol) => {
+    const t = [];
+    for (const [x, z] of [[-2.1, -2.1], [2.1, -2.1], [-2.1, 2.1], [2.1, 2.1]]) t.push(cyl(0.05, 0.05, 2.5, 0xe8e6e0, x, 1.25, z, 6));
+    const roof = new THREE.ConeGeometry(3.05, 1.2, 4, 1, true); roof.rotateY(Math.PI / 4); t.push(part(roof, roofCol, 0, 3.1, 0));
+    for (const [w, d, x, z] of [[4.3, 0.04, 0, -2.15], [4.3, 0.04, 0, 2.15], [0.04, 4.3, -2.15, 0], [0.04, 4.3, 2.15, 0]]) t.push(box(w, 0.32, d, roofCol, x, 2.38, z));
+    for (let k = 0; k < 16; k++) { const a = (k / 16) * Math.PI * 2; t.push(part(new THREE.SphereGeometry(0.05, 5, 4), 0xfff2b0, Math.cos(a) * 2.0, 2.15 - Math.abs(Math.sin(a * 2)) * 0.1, Math.sin(a) * 2.0)); }
+    return mergeGeometries(t);
+  };
+  G.tent = tent(0xf4f2ec);
+  G.tentgreen = tent(0x3f6b4a);
   const tor = (r, t, c, x, y, z, rx = Math.PI / 2) => { const g = new THREE.TorusGeometry(r, t, 6, 14); g.rotateX(rx); return part(g, c, x, y, z); };
   G.tire = mergeGeometries([tor(0.33, 0.12, 0x1a1a1a, 0, 0.12, 0), tor(0.33, 0.12, 0x1d1d1d, 0.04, 0.36, 0.02), tor(0.33, 0.12, 0x181818, -0.02, 0.6, -0.03)]);
   G.bench = mergeGeometries([box(1.8, 0.06, 0.45, 0x7a5a3a, 0, 0.45, 0), box(1.8, 0.4, 0.05, 0x7a5a3a, 0, 0.75, -0.22), ...legs(0.8, 0.18, 0.45, 0x2c2c2c)]);
@@ -158,6 +181,10 @@ const DEBRIS = {
   dumpster: { n: 9, cols: [0x2f4a36, 0x223428, 0xd0c8b0, 0x8a8070, 0xe8e4d8], size: [0.15, 0.7] },
   fence: { n: 7, cols: [0xf0ece0, 0xe8e2d4, 0xd8d2c4], size: [0.1, 1.0] },
   tire: { n: 3, cols: [0x1a1a1a], size: [0.3, 0.6] },
+  railfence: { n: 6, cols: [0x7d5a38, 0x6b4a2e], size: [0.1, 1.2] },
+  planterbox: { n: 9, cols: [0x9a7146, 0x4f7a30, 0x3f6b2a, 0xd8324a, 0xf2c14a], size: [0.1, 0.6] },
+  tent: { n: 10, cols: [0xf4f2ec, 0xe8e6e0, 0xfff2b0], size: [0.15, 1.2] },
+  tentgreen: { n: 10, cols: [0x3f6b4a, 0xe8e6e0, 0xfff2b0], size: [0.15, 1.2] },
   bench: { n: 5, cols: [0x7a5a3a, 0x2c2c2c], size: [0.2, 0.9] },
   bike: { n: 4, cols: [0x2a6aa8, 0x151515], size: [0.15, 0.6] },
   boxes: { n: 10, cols: [0xb8955f, 0xa8854f, 0xc4a06a, 0xe8e2d4], size: [0.12, 0.45] },

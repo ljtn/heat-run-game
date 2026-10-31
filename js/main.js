@@ -17,6 +17,7 @@ import { WallFixtures } from './fixtures.js';
 import { Aircraft } from './aircraft.js';
 import { setCarLod } from './carLod.js';
 import { Loot } from './loot.js';
+import { Animals } from './animals.js';
 import { HUD, fmtTime } from './hud.js';
 import { CameraRig, CAM_MODES } from './camera.js';
 import { Input } from './input.js';
@@ -111,6 +112,7 @@ class Game {
     this.music = new MusicSystem(this.audio, world);
     this.aircraft = new Aircraft(scene, this.audio, world);
     this.loot = new Loot(world, scene);
+    this.animals = new Animals(world, scene, this.effects, this.audio);
     this.score = { banked: 0, carried: 0, combo: 0, comboT: 0, best: +(localStorage.getItem('heatrun.best') || 0) };
     progress('Drawing maps', 0.88);
     await new Promise((r) => setTimeout(r, 0));
@@ -778,6 +780,7 @@ class Game {
     this.weather.update(dt, this.camera, this.atmo.preset.night);
     this.updateTunnelLight(dt);
     if (this.started && this.state === 'drive') this.updateLoot(dt);
+    this.animals.update(dt, this.time, this.camera.position, this.cars, P);
     this.fixtures.update(dt, this.camera.position);
     this.aircraft.update(dt, this.camera, this.atmo.preset.night, this.traffic.heat || 0);
     this.meshes.signals.update(this.traffic.time);
