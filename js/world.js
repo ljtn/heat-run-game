@@ -1381,6 +1381,7 @@ export class World {
       if (!nd.light) continue;
       for (const [sx, sz] of [[-1, -1], [1, 1]]) {
         const x = nd.x + sx * (nd.hx + 1.2), z = nd.z + sz * (nd.hz + 1.2);
+        if (this.onRampPath(x, z, 1)) continue; // a ramp leaves the junction through this corner
         const tl = { x, z, y: CITY.at(x, z) + CITY.curb, node: nd.id, sx, sz, broken: false };
         this.trafficLights.push(tl);
         this.colliders.push({ type: 'circle', x, z, r: 0.25, top: tl.y + 6, breakable: true, ref: tl });
@@ -1390,6 +1391,27 @@ export class World {
 
   excluded(x, z, m = 0) {
     for (const r of this.excl) if (x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m) return true;
+    return this.onRampPath(x, z, m);
+  }
+
+  // is (x,z) on the low part of an expressway ramp (where it leaves the street)? keep furniture off it
+  onRampPath(x, z, m = 0) {
+    if (!this._rampBoxes) {
+      this._rampBoxes = this.edges.filter((e) => e.ramp).map((e) => {
+        let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+        for (const p of e.pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+        return { e, x0: x0 - e.halfW - 3, x1: x1 + e.halfW + 3, z0: z0 - e.halfW - 3, z1: z1 + e.halfW + 3 };
+      });
+    }
+    for (const b of this._rampBoxes) {
+      if (x < b.x0 - m || x > b.x1 + m || z < b.z0 - m || z > b.z1 + m) continue;
+      const P = b.e.pts;
+      for (let i = 0; i < P.length - 1; i++) {
+        const a = P[i], c = P[i + 1];
+        if (Math.abs(a.x - x) > 20 || Math.abs(a.z - z) > 20) continue;
+        if (distToSeg(x, z, a.x, a.z, c.x, c.z)[0] < b.e.halfW + 1.5 + m) return true;
+      }
+    }
     return false;
   }
 
@@ -2325,7 +2347,7 @@ export class World {
         const a = P[i], b = P[i + 1];
         const L = Math.hypot(b.x - a.x, b.z - a.z);
         const rx = -(b.z - a.z) / L, rz = (b.x - a.x) / L;
-        const off = side * (e.halfW - 1.3);
+        const off = side * (e.halfW + 0.4); // on the edge of the road, not in a lane
         const x = a.x + rx * off, z = a.z + rz * off;
         const cone = this.addProp('cone', x, z, e.city ? CITY.at(x, z) : this.terrainHeight(x, z), 0);
         if (cone) { last = cone; last.rx = rx; last.rz = rz; }

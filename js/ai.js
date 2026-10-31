@@ -469,6 +469,7 @@ export class TrafficManager {
 
   unghost(d) {
     const v = d.v;
+    d.unghostT = performance.now();
     d.ghost = false; v.ghost = false;
     const g = this.world.groundAt(v.pos.x, v.pos.z, v.pos.y + 1.5).h;
     v.resetTo(v.pos.x, g, v.pos.z, v.heading, d.gSpeed || 0);
