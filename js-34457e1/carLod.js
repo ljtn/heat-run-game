@@ -18,7 +18,7 @@ export function carLodGeometry(v) {
     if (!o.isMesh || !o.visible || o === v.lod) return;
     const mat = Array.isArray(o.material) ? o.material[0] : o.material;
     // (nothing see-through: the night-time headlight ground glows are huge quads and baked in they read as white sheets)
-    if (!mat || mat.transparent || mat.blending === THREE.AdditiveBlending) return;
+    if (!mat || mat.blending === THREE.AdditiveBlending || (mat.transparent && mat.opacity < 0.5)) return;
     let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     const keep = new THREE.BufferGeometry();
     keep.setAttribute('position', g.attributes.position);

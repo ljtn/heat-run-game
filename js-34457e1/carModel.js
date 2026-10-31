@@ -326,8 +326,21 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     if (st.modern) p[1] -= 0.06 * Math.pow(Math.abs(2 * zn - 1), 3) * Math.pow(yn, 3); // the roof arcs down front and back
     return p;
   };
-  const cab = addMesh(model, mapped((xn, yn, zn) => cabRound(xn, yn * 0.9, zn, 0.03), 6, 4, 8), M.glass, deformGeos);
+  // bus windows: see-through dark tinted glass (you can see the seats and riders), and they can be smashed out
+  const tinted = spec.style === 'bus' || spec.style === 'truck';
+  const cabMat = tinted ? (M.busGlass = M.busGlass || new THREE.MeshPhysicalMaterial({ color: 0x101820, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.7, envMapIntensity: 0.8, depthWrite: false, side: THREE.DoubleSide })) : M.glass;
+  const cab = addMesh(model, mapped((xn, yn, zn) => cabRound(xn, yn * 0.9, zn, 0.03), 6, 4, 8), cabMat, deformGeos);
   cab.receiveShadow = false;
+  if (tinted) cab.renderOrder = 6;
+  if (spec.style === 'bus') {
+    // rows of seats down both sides, and a floor
+    const seatMat = M.busSeat = M.busSeat || new THREE.MeshStandardMaterial({ color: 0x2f4a6a, roughness: 0.8 });
+    for (let z = -L / 2 + st.cabStart * L + 2.0; z < L / 2 - 0.9; z += 0.95) for (const sx of [-1, 1]) {
+      addMesh(model, boxAt(0.9, 0.12, 0.45, sx * W * 0.26, st.belt - 0.38, z), seatMat, null, false);
+      addMesh(model, boxAt(0.9, 0.5, 0.08, sx * W * 0.26, st.belt - 0.1, z + 0.22), seatMat, null, false);
+    }
+    addMesh(model, boxAt(W * 0.94, 0.04, L * 0.92, 0, st.belt - 0.48, 0), M.black, null, false);
+  }
   // interior silhouettes (seats/headrests) seen through the glass
   const seatZ = -L / 2 + (st.cabStart + (st.cabEnd - st.cabStart) * 0.45) * L;
   addMesh(model, boxAt(W * 0.7, 0.3, 0.3, 0, st.belt - 0.06, seatZ + 0.2), M.seat, null, false);
@@ -682,7 +695,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   };
   // the cab may carry extra child pieces (none); remember its intact glass
   const parts = { bumperF, bumperR, caps, glass: cab.material };
-  return { paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
+  return { breakGlass: tinted, paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
 }
 
 let beamMat = null;
@@ -778,7 +791,7 @@ export function deformCar(car, px, py, pz, dx, dy, dz, amount, opts = {}) {
 // heavier damage: cracked windows, bumpers and hubcaps coming off. Returns detached parts for debris.
 export function breakCarParts(car, damage, mz, hz, dv) {
   const out = [];
-  if (damage > 0.4 && car.cab.material !== crackedGlassMaterial()) car.cab.material = crackedGlassMaterial();
+  if (damage > 0.4 && car.cab.material !== crackedGlassMaterial() && !car.cab.material.transparent) car.cab.material = crackedGlassMaterial();
   const P = car.parts;
   if (dv > 7 && mz < -hz * 0.5 && P.bumperF.visible) { P.bumperF.visible = false; out.push(P.bumperF); }
   if (dv > 7 && mz > hz * 0.5 && P.bumperR.visible) { P.bumperR.visible = false; out.push(P.bumperR); }
@@ -796,6 +809,7 @@ export function repairCar(car) {
   }
   if (car.parts) {
     car.cab.material = car.parts.glass;
+    car.cab.visible = true; // (smashed bus and truck windows come back with the vehicle)
     car.parts.bumperF.visible = car.parts.bumperR.visible = true;
     for (const c of car.parts.caps) c.visible = true;
   }

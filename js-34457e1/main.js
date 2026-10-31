@@ -466,8 +466,8 @@ class Game {
         return Math.max(0, extra);
       };
       const dva = hitOnce(a, vn * fa * 1.15), dvb = hitOnce(b, vn * fb * 1.15);
-      if (dva > 0) this.applyDamage(a, dva, px, pz, nx, nz);
-      if (dvb > 0) this.applyDamage(b, dvb, px, pz, -nx, -nz);
+      if (dva > 0) this.applyDamage(a, dva, px, pz, nx, nz, vn);
+      if (dvb > 0) this.applyDamage(b, dvb, px, pz, -nx, -nz, vn);
       const P = this.player;
       if (a === P || b === P) {
         if (vn > 1.2) { this.audio.crash(Math.min(1, vn / 16)); this.camRig.addShake(Math.min(1, vn * 0.06)); }
@@ -554,7 +554,7 @@ class Game {
     if (d < 120) this.audio.crash(Math.min(1, intensity / 16) * Math.min(1, 20 / Math.max(d, 8)));
   }
 
-  applyDamage(v, dv, px, pz, nx, nz) {
+  applyDamage(v, dv, px, pz, nx, nz, impact = dv) {
     const isP = v === this.player;
     if (dv < (isP ? 1.8 : 1.1)) return;
     const police = v.driver && v.driver.role === 'police';
@@ -576,6 +576,15 @@ class Game {
       // the cars you hit crumple hard: big, wide dents, buckled hoods, scraped paint, bits flying off
       if (isP) deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.5, (dv - 1.5) * (this._treeHit ? 0.06 : 0.04)));
       else deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.85, (dv - 0.8) * 0.085), { R: 1.55, maxOff: 0.8, buckle: 0.55, scuff: 7 });
+      // a hard knock shatters a bus's or truck's windows: a shower of glass and the frames left open
+      if (v.car.breakGlass && v.car.cab.visible && impact > 7) { // (closing speed: a bus hardly budges when you hit it)
+        v.car.cab.visible = false;
+        for (let k = 0; k < 26; k++) {
+          const s2 = 0.1 + Math.random() * 0.22;
+          this.props.debris.spawn(px + (Math.random() - 0.5) * 2, v.pos.y + 0.8 + Math.random() * 1.2, pz + (Math.random() - 0.5) * 2, v.vel.x * 0.4 + nx * (2 + Math.random() * 3), 1 + Math.random() * 3, v.vel.z * 0.4 + nz * (2 + Math.random() * 3), s2, 0.02, s2, 0xbfd6e2);
+        }
+        this.audio.glass && this.audio.glass();
+      }
       for (const part of breakCarParts(v.car, isP ? v.damage : Math.min(1, v.damage * 1.6 + 0.1), mz, v.hz, isP ? dv : dv * 1.4)) {
         // the detached piece tumbles away as debris
         part.getWorldPosition(_v);
