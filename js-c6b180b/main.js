@@ -25,7 +25,7 @@ import { Atmosphere, PRESETS } from './sky.js';
 import { Tram } from './tram.js';
 import { FireSystem } from './fires.js';
 import { Races } from './race.js';
-import { PrimevalValley, TRex } from './dinos.js';
+import { PrimevalValley, TRex, Raptor } from './dinos.js';
 import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
@@ -114,6 +114,7 @@ class Game {
     this.tram = new Tram(world, scene);
     this.park = new PrimevalValley(world, scene);
     this.rex = world.rex ? new TRex(scene, world, this) : null;
+    this.raptors = world.rex && world.rex.pen ? world.rex.pen.starts.map((st, i) => new Raptor(scene, world, this, st, i)) : [];
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -487,6 +488,11 @@ class Game {
     };
     C.onBreak = (c, v, px, pz) => {
       const ref = c.ref;
+      if (c.penPanel !== undefined) {
+        this.effects.burstSparks(px, v.pos.y + 1, pz, v.vel.x * 0.05, v.vel.z * 0.05, 10);
+        if (this.park.breakPen(c.penPanel, this.raptors)) this.hud.message('THE RAPTORS ARE LOOSE!', 4, 'crime');
+        return;
+      }
       if (c.rexPanel !== undefined) {
         this.effects.burstSparks(px, v.pos.y + 1, pz, v.vel.x * 0.05, v.vel.z * 0.05, 14);
         this.audio.crash && this.audio.crash(1);
@@ -836,6 +842,11 @@ class Game {
       const rd = Math.hypot(this.camera.position.x - this.rex.x, this.camera.position.z - this.rex.z);
       this.rex.root.visible = rd < 1500;
       if (rd < 1500 || this.rex.state !== 'caged') this.rex.update(Math.min(dt, 0.05), this.time);
+      for (const r of this.raptors) {
+        const d2 = Math.hypot(this.camera.position.x - r.x, this.camera.position.z - r.z);
+        r.root.visible = d2 < 700;
+        if (d2 < 900 || r.state !== 'caged') r.update(Math.min(dt, 0.05), this.time);
+      }
       // loose: the police are sent after it, again and again
       if (this.rex.state === 'loose' && this.state === 'drive') {
         this.rexCallT = (this.rexCallT || 0) - dt;

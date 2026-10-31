@@ -657,7 +657,7 @@ export class World {
       const ids = [e(G, ring[0], [], 'village')];
       const mids = [[1590, 380], [1810, 400], [1850, 680], [1640, 770], [1500, 580]];
       for (let k = 0; k < ring.length; k++) ids.push(e(ring[k], ring[(k + 1) % ring.length], [mids[k]], 'village'));
-      const RG = n(REX.x - REX.half - 14, REX.gateZ);
+      const RG = n(REX.x - REX.half - 9 - 10, REX.gateZ); // the road ends at the outer gate
       ids.push(e(ring[2], RG, [[1910, 520]], 'village'));
       for (const id of ids) this.edges[id].park = true;
       this.parkLoop = ids.slice(1, 1 + ring.length);
@@ -1734,29 +1734,49 @@ export class World {
   // a heavy closed gate, floodlight towers, a guard booth, warning signs everywhere, police cars out front
   buildRexCompound() {
     const { x: cx, z: cz, half: H, gateZ } = REX, y = this.terrainHeight(cx, cz);
-    this.excl.push({ x0: cx - H - 30, x1: cx + H + 10, z0: cz - H - 10, z1: cz + H + 10 });
+    const O = H + 9; // the outer ring of the double fence
+    this.excl.push({ x0: cx - O - 40, x1: cx + O + 6, z0: cz - O - 6, z1: cz + O + 6 });
     const panels = [];
+    let outer = false;
     const side = (ax, az, bx, bz) => {
       const L = Math.hypot(bx - ax, bz - az), n = Math.round(L / 4);
       for (let k = 0; k < n; k++) {
         const x0 = ax + (bx - ax) * k / n, z0 = az + (bz - az) * k / n, x1 = ax + (bx - ax) * (k + 1) / n, z1 = az + (bz - az) * (k + 1) / n;
         const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, gate = Math.abs(ax - bx) < 1 && ax < cx && Math.abs(mz - gateZ) < 6;
-        const p = { x0, z0, x1, z1, y: this.terrainHeight(mx, mz), gate, broken: false, idx: panels.length };
+        const p = { x0, z0, x1, z1, y: this.terrainHeight(mx, mz), gate, outer, broken: false, idx: panels.length };
         panels.push(p);
         const sl = Math.hypot(x1 - x0, z1 - z0);
-        this.colliders.push({ type: 'box', x: mx, z: mz, hx: sl / 2, hz: 0.35, c: (x1 - x0) / sl, s: (z1 - z0) / sl, top: p.y + 8, tall: true, breakable: true, breakV: gate ? 16 : 12.5, slow: 0.62, rexPanel: p.idx });
+        this.colliders.push({ type: 'box', x: mx, z: mz, hx: sl / 2, hz: 0.35, c: (x1 - x0) / sl, s: (z1 - z0) / sl, top: p.y + 8, tall: true, breakable: true, breakV: gate ? 16 : outer ? 12.5 : 10.5, slow: outer ? 0.8 : 0.65, rexPanel: p.idx }); // (a fast run gets through both)
       }
     };
-    side(cx - H, cz - H, cx + H, cz - H); side(cx + H, cz - H, cx + H, cz + H); side(cx + H, cz + H, cx - H, cz + H); side(cx - H, cz + H, cx - H, cz - H);
-    // floodlight towers at the corners, a guard booth by the gate
-    const towers = [[cx - H - 4, cz - H - 4], [cx + H + 4, cz - H - 4], [cx + H + 4, cz + H + 4], [cx - H - 4, cz + H + 4]];
+    for (const R of [H, O]) { outer = R === O; side(cx - R, cz - R, cx + R, cz - R); side(cx + R, cz - R, cx + R, cz + R); side(cx + R, cz + R, cx - R, cz + R); side(cx - R, cz + R, cx - R, cz - R); }
+    // floodlight towers between the two fences at the corners, a guard booth by the gate
+    const towers = [[cx - H - 4.5, cz - H - 4.5], [cx + H + 4.5, cz - H - 4.5], [cx + H + 4.5, cz + H + 4.5], [cx - H - 4.5, cz + H + 4.5]];
     for (const [x, z] of towers) this.colliders.push({ type: 'circle', x, z, r: 0.8, top: y + 18, tall: true });
-    const booth = { x: cx - H - 9, z: gateZ - 11 };
+    const booth = { x: cx - O - 12, z: gateZ - 12 };
     this.colliders.push({ type: 'box', x: booth.x, z: booth.z, hx: 1.6, hz: 1.6, c: 1, s: 0, top: y + 3, tall: true });
     // police cars on guard outside the gate, nose out
-    const types = [[cx - H - 20, gateZ + 9, Math.PI / 2], [cx - H - 20, gateZ - 9, Math.PI / 2 + 0.2], [cx - H - 8, gateZ + 18, 0.4]];
+    const types = [[cx - O - 30, gateZ + 15, Math.PI / 2], [cx - O - 30, gateZ - 15, Math.PI / 2 + 0.2], [cx - O - 14, gateZ + 20, 0.4]];
     for (const [x, z, heading] of types) this.parkedCars.push({ x, z, y: this.terrainHeight(x, z), heading, type: 'police', scheme: 'police', guard: true });
-    this.rex = { x: cx, z: cz, half: H, y, gateZ, panels, towers, booth };
+    // the raptor pen just north of the compound: 6 m panels, twenty small fast ones inside
+    const pen = { x: cx, z: cz - O - 42, half: 28, panels: [] };
+    pen.y = this.terrainHeight(pen.x, pen.z);
+    this.excl.push({ x0: pen.x - pen.half - 6, x1: pen.x + pen.half + 6, z0: pen.z - pen.half - 6, z1: pen.z + pen.half + 6 });
+    const pside = (ax, az, bx, bz) => {
+      const L = Math.hypot(bx - ax, bz - az), n = Math.round(L / 4);
+      for (let k = 0; k < n; k++) {
+        const x0 = ax + (bx - ax) * k / n, z0 = az + (bz - az) * k / n, x1 = ax + (bx - ax) * (k + 1) / n, z1 = az + (bz - az) * (k + 1) / n;
+        const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, p = { x0, z0, x1, z1, y: this.terrainHeight(mx, mz), broken: false, idx: pen.panels.length };
+        pen.panels.push(p);
+        const sl = Math.hypot(x1 - x0, z1 - z0);
+        this.colliders.push({ type: 'box', x: mx, z: mz, hx: sl / 2, hz: 0.3, c: (x1 - x0) / sl, s: (z1 - z0) / sl, top: p.y + 6, tall: true, breakable: true, breakV: 10.5, slow: 0.7, penPanel: p.idx });
+      }
+    };
+    const PH = pen.half;
+    pside(pen.x - PH, pen.z - PH, pen.x + PH, pen.z - PH); pside(pen.x + PH, pen.z - PH, pen.x + PH, pen.z + PH); pside(pen.x + PH, pen.z + PH, pen.x - PH, pen.z + PH); pside(pen.x - PH, pen.z + PH, pen.x - PH, pen.z - PH);
+    pen.starts = [];
+    for (let k = 0; k < 20; k++) pen.starts.push({ x: pen.x + (Math.random() - 0.5) * (PH - 5) * 2, z: pen.z + (Math.random() - 0.5) * (PH - 5) * 2 });
+    this.rex = { x: cx, z: cz, half: H, outerHalf: O, y, gateZ, panels, towers, booth, pen };
   }
 
   // tall roadside billboards along the country highways and roads, angled to face oncoming traffic

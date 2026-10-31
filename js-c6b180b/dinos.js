@@ -319,14 +319,26 @@ export class PrimevalValley {
       ctx.fillStyle = '#111'; ctx.font = 'bold 22px Arial, sans-serif'; ctx.fillText('LARGE CARNIVORE', w / 2, 116); ctx.fillText('DO NOT APPROACH', w / 2, 144); ctx.fillText('10,000 VOLTS', w / 2, 172);
     });
     const sm = new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.6, side: THREE.DoubleSide });
-    const sp = C.panels.filter((p, i) => i % 3 === 1 && !p.gate);
-    const signs = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.6, 1.2), sm, sp.length + 4);
-    sp.forEach((p, i) => { const rot = Math.atan2(-(p.z1 - p.z0), p.x1 - p.x0); q.setFromAxisAngle(up, rot); const ox = Math.sin(rot) * 0.25, oz = Math.cos(rot) * 0.25; m4.compose(new THREE.Vector3((p.x0 + p.x1) / 2 - ox, p.y + 2.4, (p.z0 + p.z1) / 2 - oz), q, one); signs.setMatrixAt(i, m4); });
-    [[-12, 6], [-12, -6], [-26, 14], [-26, -14]].forEach(([dx, dz], k) => { q.setFromAxisAngle(up, -Math.PI / 2); m4.compose(new THREE.Vector3(C.x - C.half + dx, C.y + 2.2, C.gateZ + dz), q, new THREE.Vector3(2.2, 2.2, 1)); signs.setMatrixAt(sp.length + k, m4); });
+    const inner = C.panels.filter((p, i) => i % 3 === 1 && !p.gate && !p.outer), outerS = C.panels.filter((p, i) => i % 4 === 2 && !p.gate && p.outer);
+    const gateSigns = [[-24, 7.5], [-24, -7.5], [-40, 9], [-40, -9], [-56, 9], [-56, -9]];
+    const signs = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.6, 1.2), sm, inner.length + outerS.length + gateSigns.length);
+    let si = 0;
+    for (const [list, sc, h] of [[inner, 1, 2.4], [outerS, 2.6, 3.6]]) for (const p of list) { // big ones on the outer fence, facing out
+      const rot = Math.atan2(-(p.z1 - p.z0), p.x1 - p.x0), mx = (p.x0 + p.x1) / 2, mz = (p.z0 + p.z1) / 2;
+      const ox = Math.sin(rot), oz = Math.cos(rot), outward = Math.sign((mx - C.x) * ox + (mz - C.z) * oz) || 1;
+      q.setFromAxisAngle(up, rot + (outward < 0 ? Math.PI : 0)); m4.compose(new THREE.Vector3(mx + ox * 0.3 * outward, p.y + h, mz + oz * 0.3 * outward), q, new THREE.Vector3(sc, sc, 1)); signs.setMatrixAt(si++, m4);
+    }
+    const gx0 = C.x - C.outerHalf;
+    gateSigns.forEach(([dx, dz]) => { q.setFromAxisAngle(up, -Math.PI / 2); m4.compose(new THREE.Vector3(gx0 + dx + 18, C.y + 3.6, C.gateZ + dz), q, new THREE.Vector3(3.2, 3.2, 1)); signs.setMatrixAt(si++, m4); });
     scene.add(signs);
+    // a giant RESTRICTED AREA board over the outer gate
+    const rTex = canvasTex(512, 160, (ctx, w, h) => { ctx.fillStyle = '#c81e1e'; ctx.fillRect(0, 0, w, h); ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.strokeRect(8, 8, w - 16, h - 16); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 62px Impact, sans-serif'; ctx.fillText('RESTRICTED AREA', w / 2, 76); ctx.font = 'bold 30px Arial, sans-serif'; ctx.fillText('AUTHORIZED PERSONNEL ONLY', w / 2, 124); });
+    const rb = new THREE.Mesh(new THREE.PlaneGeometry(11, 3.4), new THREE.MeshStandardMaterial({ map: rTex, side: THREE.DoubleSide, roughness: 0.6 }));
+    rb.position.set(gx0 - 0.4, C.y + 10, C.gateZ); rb.rotation.y = -Math.PI / 2; scene.add(rb);
     // sign posts for the free-standing ones, floodlight towers, the guard booth
     const parts = [], col = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); parts.push(g.index ? g.toNonIndexed() : g); };
-    for (const [dx, dz] of [[-12, 6], [-12, -6], [-26, 14], [-26, -14]]) col(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 6).translate(C.x - C.half + dx, C.y + 1.7, C.gateZ + dz + 0.3), 0x5a5e62);
+    for (const [dx, dz] of gateSigns) for (const o of [-1.8, 1.8]) col(new THREE.CylinderGeometry(0.1, 0.1, 3.6, 6).translate(gx0 + dx + 18 + 0.25, C.y + 1.8, C.gateZ + dz + o), 0x5a5e62);
+    for (const o of [-6, 6]) col(new THREE.BoxGeometry(0.5, 12, 0.5).translate(gx0 - 0.6, C.y + 6, C.gateZ + o), 0x3a3e42); // posts for the gate board
     for (const [x, z] of C.towers) {
       col(new THREE.CylinderGeometry(0.35, 0.5, 18, 8).translate(x, C.y + 9, z), 0x5a5e62);
       col(new THREE.BoxGeometry(3, 0.3, 1).translate(x, C.y + 18, z), 0x3a3e42);
@@ -339,6 +351,16 @@ export class PrimevalValley {
     const cm = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
     cm.castShadow = cm.receiveShadow = true;
     scene.add(cm);
+    // the raptor pen: lower panels in the same steel, warning signs of its own
+    const pen = C.pen;
+    if (pen) {
+      const im = new THREE.InstancedMesh(panelG, pm, pen.panels.length);
+      pen.panels.forEach((p, i) => { p.im = im; p.ii = i; q.setFromAxisAngle(up, Math.atan2(-(p.z1 - p.z0), p.x1 - p.x0)); m4.compose(new THREE.Vector3((p.x0 + p.x1) / 2, p.y, (p.z0 + p.z1) / 2), q, new THREE.Vector3(1, 0.75, 1)); im.setMatrixAt(i, m4); });
+      im.castShadow = true; scene.add(im);
+      const ps = pen.panels.filter((p, i) => i % 3 === 1), ims = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.6, 1.2), sm, ps.length);
+      ps.forEach((p, i) => { const rot = Math.atan2(-(p.z1 - p.z0), p.x1 - p.x0), mx = (p.x0 + p.x1) / 2, mz = (p.z0 + p.z1) / 2, ox = Math.sin(rot), oz = Math.cos(rot), out = Math.sign((mx - pen.x) * ox + (mz - pen.z) * oz) || 1; q.setFromAxisAngle(up, rot + (out < 0 ? Math.PI : 0)); m4.compose(new THREE.Vector3(mx + ox * 0.3 * out, p.y + 2.6, mz + oz * 0.3 * out), q, new THREE.Vector3(1.6, 1.6, 1)); ims.setMatrixAt(i, m4); });
+      scene.add(ims);
+    }
     this.floods = C.towers.map(([x, z]) => { const l = new THREE.SpotLight(0xfff4e0, 0, 120, 0.7, 0.5, 1.2); l.position.set(x, C.y + 18, z); l.target.position.set(C.x, C.y, C.z); scene.add(l, l.target); return l; });
   }
 
@@ -348,12 +370,23 @@ export class PrimevalValley {
     if (!p || p.broken) return;
     p.broken = true;
     p.im.setMatrixAt(p.ii, new THREE.Matrix4().makeScale(0, 0, 0)); p.im.instanceMatrix.needsUpdate = true;
-    if (rex && rex.state === 'caged') {
-      rex.state = 'escaping'; rex.breach = { x: (p.x0 + p.x1) / 2 + Math.sign((p.x0 + p.x1) / 2 - C.x) * 8 * (Math.abs(p.x0 - p.x1) < 1 ? 1 : 0), z: (p.z0 + p.z1) / 2 + Math.sign((p.z0 + p.z1) / 2 - C.z) * 8 * (Math.abs(p.z0 - p.z1) < 1 ? 1 : 0) };
+    if (rex && rex.state === 'caged' && !p.outer) {
+      rex.state = 'escaping'; rex.breach = { x: (p.x0 + p.x1) / 2 + Math.sign((p.x0 + p.x1) / 2 - C.x) * 18 * (Math.abs(p.x0 - p.x1) < 1 ? 1 : 0), z: (p.z0 + p.z1) / 2 + Math.sign((p.z0 + p.z1) / 2 - C.z) * 18 * (Math.abs(p.z0 - p.z1) < 1 ? 1 : 0) }; // out past the outer fence
       rex.roar();
       return true;
     }
     return false;
+  }
+
+  // a hole in the raptor pen: out they come, through the gap
+  breakPen(idx, raptors) {
+    const pen = this.world.rex.pen, p = pen.panels[idx];
+    if (!p) return false;
+    if (!p.broken) { p.broken = true; p.im.setMatrixAt(p.ii, new THREE.Matrix4().makeScale(0, 0, 0)); p.im.instanceMatrix.needsUpdate = true; for (const c of this.world.colliders) if (c.penPanel === idx) c.broken = true; }
+    let freed = false;
+    const mx = (p.x0 + p.x1) / 2, mz = (p.z0 + p.z1) / 2, dx = mx - pen.x, dz = mz - pen.z, L = Math.hypot(dx, dz) || 1;
+    for (const r of raptors || []) if (r.state === 'caged') { r.state = 'escaping'; r.breach = { x: mx + (dx / L) * 6, z: mz + (dz / L) * 6 }; freed = true; }
+    return freed;
   }
 
   // put everything back: panels up, the animal back inside
@@ -384,18 +417,18 @@ export class PrimevalValley {
 // Caged it paces its compound and comes to the fence to roar at you; loose, it heads along the roads for the city,
 // charges you when you're close, shoves and stomps cars and swings its tail into police cars.
 export class TRex {
-  constructor(scene, world, game) {
-    this.world = world; this.game = game;
+  constructor(scene, world, game, opts = {}) {
+    this.world = world; this.game = game; this.opts = opts;
     const C = world.rex;
     this.x = C.x; this.z = C.z; this.heading = 0; this.speed = 0; this.phase = 0;
     this.state = 'caged'; this.t = 0; this.target = null; this.roarT = 0; this.jaw = 0; this.swipe = 0; this.swipeDir = 1; this.swipeCool = 0; this.path = [];
     const skin = skinTexture(); skin.repeat.set(4, 4);
-    const mat = new THREE.MeshStandardMaterial({ map: skin, color: 0x6a6450, roughness: 0.85 });
-    const dark = new THREE.MeshStandardMaterial({ map: skin, color: 0x3e3a2e, roughness: 0.85 });
-    const pale = new THREE.MeshStandardMaterial({ map: skin, color: 0x9a907a, roughness: 0.9 });
+    const mat = new THREE.MeshStandardMaterial({ map: skin, color: opts.color || 0x6a6450, roughness: 0.85 });
+    const dark = new THREE.MeshStandardMaterial({ map: skin, color: opts.dark || 0x3e3a2e, roughness: 0.85 });
+    const pale = new THREE.MeshStandardMaterial({ map: skin, color: opts.pale || 0x9a907a, roughness: 0.9 });
     const tooth = new THREE.MeshStandardMaterial({ color: 0xe8e0c8, roughness: 0.4 });
     const mouth = new THREE.MeshStandardMaterial({ color: 0x5a1a14, roughness: 0.6 });
-    const S = 1.15;
+    const S = opts.scale || 1.15;
     const root = (this.root = new THREE.Group()); root.scale.setScalar(S); scene.add(root);
     const hipH = 4.0;
     const pelvis = (this.pelvis = new THREE.Group()); pelvis.position.y = hipH; root.add(pelvis);
@@ -411,8 +444,11 @@ export class TRex {
     // a row of low bumps (osteoderm-like ridging) down the back
     for (let k = 0; k < 8; k++) pelvis.add(new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6).scale(0.8, 0.6, 1.4).translate(0, 1.45 - k * 0.04 + 0.05, 3.4 - k * 0.7), dark));
     // neck and head: a short thick S-neck, a massive deep skull, the lower jaw on a hinge
+    pelvis.add(new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12).scale(1.05, 1.15, 1.35).translate(0, 0.35, 3.5), mat)); // shoulders and the root of the neck
     const neck = (this.neck = new THREE.Group()); neck.position.set(0, 0.55, 3.9); pelvis.add(neck);
-    neck.add(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.95, 2.0, 16).rotateX(Math.PI / 2 - 0.5).translate(0, 0.45, 0.8), mat));
+    neck.add(new THREE.Mesh(new THREE.SphereGeometry(1.0, 16, 12).scale(0.95, 1.05, 1.1), mat)); // the neck base, so it bends without a gap
+    neck.add(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.98, 2.8, 16).rotateX(Math.PI / 2 - 0.5).translate(0, 0.3, 0.55), mat));
+    neck.add(new THREE.Mesh(new THREE.SphereGeometry(0.8, 14, 10).translate(0, 0.85, 1.55), mat)); // and where it meets the head
     neck.add(new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10).scale(0.62, 0.55, 1.1).translate(0, -0.25, 1.2), pale)); // the throat
     for (let k = 0; k < 4; k++) neck.add(new THREE.Mesh(new THREE.TorusGeometry(0.86 - k * 0.04, 0.05, 6, 18).rotateY(Math.PI / 2).rotateZ(Math.PI / 2).rotateX(-0.5).translate(0, 0.2 + k * 0.17, 0.35 + k * 0.32), dark)); // skin folds
     const head = (this.head = new THREE.Group()); head.position.set(0, 1.0, 1.7); neck.add(head);
@@ -456,7 +492,7 @@ export class TRex {
     // tail: thick at the root, a long counterweight tapering to a point
     this.tail = [];
     let parent = new THREE.Group(); parent.position.set(0, 0.25, -1.2); pelvis.add(parent);
-    const TS = 14, tailL = 6.8;
+    const TS = opts.lite ? 7 : 14, tailL = 6.8;
     for (let k = 0; k < TS; k++) {
       const f = k / TS, len = tailL / TS, r0 = 1.05 * (1 - f) ** 1.2 + 0.05, r1 = 1.05 * (1 - (k + 1) / TS) ** 1.2 + 0.04;
       const seg = new THREE.Group(); parent.add(seg);
@@ -490,6 +526,20 @@ export class TRex {
       for (let i = 0; i < n.count; i++) { const y = n.getY(i), k = y > 0 ? 0.62 + 0.38 * (1 - y) : 1 - 0.45 * y; a[i * 3] = k * (y < -0.3 ? 1.12 : 1); a[i * 3 + 1] = k * (y < -0.3 ? 1.08 : 1); a[i * 3 + 2] = k * (y < -0.3 ? 0.98 : 0.95); }
       g.setAttribute('color', new THREE.BufferAttribute(a, 3));
     });
+    // one mesh per material per joint (a full rig is hundreds of little parts otherwise)
+    root.traverse((grp) => {
+      const byMat = new Map();
+      for (const ch of grp.children) if (ch.isMesh && !ch.children.length) (byMat.get(ch.material) || byMat.set(ch.material, []).get(ch.material)).push(ch);
+      for (const [m, list] of byMat) {
+        if (list.length < 2) continue;
+        const geos = list.map((ch) => { ch.updateMatrix(); const g = (ch.geometry.index ? ch.geometry.toNonIndexed() : ch.geometry.clone()).applyMatrix4(ch.matrix); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(k)) g.deleteAttribute(k); return g; });
+        const keys = Object.keys(geos[0].attributes);
+        if (!geos.every((g) => Object.keys(g.attributes).length === keys.length && keys.every((k) => g.attributes[k]))) continue;
+        for (const ch of list) grp.remove(ch);
+        const merged = new THREE.Mesh(mergeGeometries(geos), m); merged.castShadow = !opts.lite; grp.add(merged);
+      }
+    });
+    if (opts.lite) root.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     this.S = S;
     this.place();
   }
@@ -517,39 +567,23 @@ export class TRex {
     const w = this.world, g = this.game, C = w.rex, P = g.player;
     const pd = Math.hypot(P.pos.x - this.x, P.pos.z - this.z);
     this.t -= dt; this.roarT -= dt; this.swipeCool -= dt;
-    let want = 0, tx = this.x, tz = this.z;
-    if (this.state === 'caged') {
-      // pace the compound; when you come near, stride to the fence on your side and roar at you
-      if (pd < 70) { tx = Math.max(C.x - C.half + 9, Math.min(C.x + C.half - 9, P.pos.x)); tz = Math.max(C.z - C.half + 9, Math.min(C.z + C.half - 9, P.pos.z)); want = 3.2; if (this.roarT <= 0) { this.roar(); this.roarT = 7 + Math.random() * 6; } }
-      else { if (!this.target || this.t <= 0) { this.target = { x: C.x + (Math.random() - 0.5) * (C.half - 14) * 2, z: C.z + (Math.random() - 0.5) * (C.half - 14) * 2 }; this.t = 10 + Math.random() * 10; } tx = this.target.x; tz = this.target.z; want = 1.6; }
-      if (Math.hypot(tx - this.x, tz - this.z) < 3) want = 0;
-    } else if (this.state === 'escaping') {
-      // out through the gap, then away down the road
-      tx = this.breach.x; tz = this.breach.z; want = 9;
-      if (Math.hypot(tx - this.x, tz - this.z) < 5) { this.state = 'loose'; this.planTo(-698, -8); this.roar(); }
-    } else {
-      // loose: chase the player when close, otherwise follow the roads into town (and on, from block to block)
-      if (pd < 85) { tx = P.pos.x; tz = P.pos.z; want = 13; }
-      else {
-        while (this.path.length && Math.hypot(this.path[0].x - this.x, this.path[0].z - this.z) < 6) this.path.shift();
-        if (!this.path.length) { const ns = w.nodes.filter((n) => n.city); const n = ns[Math.floor(Math.random() * ns.length)]; this.planTo(n.x, n.z); }
-        if (this.path.length) { tx = this.path[0].x; tz = this.path[0].z; }
-        want = 8;
-      }
-      if (this.roarT <= 0 && pd < 220) { this.roar(); this.roarT = 9 + Math.random() * 8; }
-    }
+    let { tx, tz, want } = this.think(dt, pd, P, C, g, w);
     // low growls between the roars whenever you're near
-    this.growlT = (this.growlT || 2) - dt;
-    if (this.growlT <= 0 && pd < 160 && !(this.jawT > 0)) { this.growlT = 2.2 + Math.random() * 2.5; if (g.audio.growl) g.audio.growl(Math.max(0.05, 1 - pd / 160)); this.jawT = -0.01; this.growlJaw = 1.1; }
-    this.growlJaw = Math.max(0, (this.growlJaw || 0) - dt);
+    if (this.growls !== false) {
+      this.growlT = (this.growlT || 2) - dt;
+      if (this.growlT <= 0 && pd < 160 && !(this.jawT > 0)) { this.growlT = 2.2 + Math.random() * 2.5; if (g.audio.growl) g.audio.growl(Math.max(0.05, 1 - pd / 160) * (this.opts.voice || 1)); this.growlJaw = 1.1; }
+      this.growlJaw = Math.max(0, (this.growlJaw || 0) - dt);
+    }
     // steer and stride
     const dh0 = Math.atan2(tx - this.x, tz - this.z) - this.heading, dh = Math.atan2(Math.sin(dh0), Math.cos(dh0));
-    this.heading += Math.max(-1.1 * dt, Math.min(1.1 * dt, dh));
+    const turnMax = 1.7 * (this.opts.lite ? 2.2 : 1);
+    this.turnV = (this.turnV || 0) + (Math.max(-turnMax, Math.min(turnMax, dh * 2.5)) - (this.turnV || 0)) * Math.min(1, dt * 4);
+    this.heading += this.turnV * dt;
     if (Math.abs(dh) > 1.2) want = Math.min(want, 2);
     this.speed += (want - this.speed) * Math.min(1, dt * 2.2);
     const nx = this.x + Math.sin(this.heading) * this.speed * dt, nz = this.z + Math.cos(this.heading) * this.speed * dt;
     // caged: the fence holds it (unless there's a gap it's heading for)
-    if (this.state === 'caged') { this.x = Math.max(C.x - C.half + 6, Math.min(C.x + C.half - 6, nx)); this.z = Math.max(C.z - C.half + 6, Math.min(C.z + C.half - 6, nz)); }
+    if (this.state === 'caged') { const K = this.cage(); this.x = Math.max(K.x - K.half, Math.min(K.x + K.half, nx)); this.z = Math.max(K.z - K.half, Math.min(K.z + K.half, nz)); }
     else { this.x = nx; this.z = nz; }
     const y = w.groundAt(this.x, this.z, (this.root.position.y || 80) + 4).h;
     this.root.position.set(this.x, y, this.z);
@@ -580,9 +614,26 @@ export class TRex {
     const roaring = this.jawT > 0;
     this.jaw += ((roaring ? 0.75 + Math.sin(time * 30) * 0.05 : this.growlJaw > 0 ? 0.18 + Math.sin(time * 18) * 0.04 : 0.04 + run * 0.1) - this.jaw) * Math.min(1, dt * 6);
     this.jawG.rotation.x = this.jaw;
-    this.neck.rotation.x = roaring ? -0.35 + Math.sin(time * 2) * 0.1 : 0.1 + run * 0.15 + Math.sin(this.phase * TAU * 2) * 0.04 * amt;
-    this.neck.rotation.y = roaring ? Math.sin(time * 1.6) * 0.3 : Math.sin(time * 0.7) * 0.12;
-    this.head.rotation.x = roaring ? -0.2 : 0.05;
+    // the head: tracks you, cocks in quick bird-like twitches, rears back and thrusts forward to roar; all on springs
+    const toP = Math.atan2(P.pos.x - this.x, P.pos.z - this.z) - this.heading, rel = Math.atan2(Math.sin(toP), Math.cos(toP));
+    const track = pd < 150 ? Math.max(-0.75, Math.min(0.75, rel)) : Math.sin(time * 0.5 + this.x) * 0.25;
+    this.twT = (this.twT || 0) - dt;
+    if (this.twT <= 0) { this.twT = 1.2 + Math.random() * 2.8; this.tw = (Math.random() - 0.5) * 0.5; this.twP = (Math.random() - 0.4) * 0.25; }
+    const twHold = this.twT > 0.9 ? 1 : 0; // snap to a new angle, hold it, then let go
+    let tX, tY, tH;
+    if (roaring) {
+      const rt = 2.4 - this.jawT; // rear up, shake, thrust forward
+      tX = -0.5 + 0.75 * Math.min(1, Math.max(0, (rt - 0.5) / 0.9)); tY = track * 0.6 + Math.sin(rt * 7) * 0.22 * Math.max(0, 1 - rt / 2.4); tH = -0.25 + 0.3 * Math.min(1, rt / 1.2);
+    } else {
+      const stalk = pd < 60 ? 0.22 : 0;
+      tX = 0.08 + run * 0.18 + stalk + Math.sin(this.phase * TAU * 2) * 0.05 * amt + this.twP * twHold; tY = track + this.tw * twHold; tH = 0.04 - stalk * 0.4;
+    }
+    const spring = (k, target, kk, damp) => { this[k + 'v'] = (this[k + 'v'] || 0) + ((target - (this[k] || 0)) * kk - (this[k + 'v'] || 0) * damp) * dt; this[k] = (this[k] || 0) + this[k + 'v'] * dt; return this[k]; };
+    const fast = this.opts.lite ? 1.6 : 1;
+    this.neck.rotation.x = spring('nX', tX, 55 * fast, 10);
+    this.neck.rotation.y = spring('nY', tY * 0.55, 70 * fast, 11);
+    this.head.rotation.y = spring('hY', tY * 0.45, 90 * fast, 12);
+    this.head.rotation.x = spring('hX', tH - (this.nX || 0) * 0.35, 80 * fast, 12); // the eyes stay fixed on you
     // tail: swings with the stride, whips round in a swipe
     if (this.swipe > 0) this.swipe -= dt;
     const sw = this.swipe > 0 ? Math.sin((1 - this.swipe / 0.9) * Math.PI) * this.swipeDir : 0;
@@ -593,6 +644,40 @@ export class TRex {
     });
     if (this.state !== 'caged') this.smash(dt, sw);
   }
+
+  think(dt, pd, P, C, g, w) {
+    let want = 0, tx = this.x, tz = this.z;
+    if (this.state === 'caged') {
+      // pace the compound; when you come near, stride to the fence on your side and roar at you
+      if (pd < 70) { tx = Math.max(C.x - C.half + 9, Math.min(C.x + C.half - 9, P.pos.x)); tz = Math.max(C.z - C.half + 9, Math.min(C.z + C.half - 9, P.pos.z)); want = 3.2; if (this.roarT <= 0) { this.roar(); this.roarT = 7 + Math.random() * 6; } }
+      else { if (!this.target || this.t <= 0) { this.target = { x: C.x + (Math.random() - 0.5) * (C.half - 14) * 2, z: C.z + (Math.random() - 0.5) * (C.half - 14) * 2 }; this.t = 10 + Math.random() * 10; } tx = this.target.x; tz = this.target.z; want = 1.6; }
+      if (Math.hypot(tx - this.x, tz - this.z) < 3) want = 0;
+    } else if (this.state === 'escaping') {
+      // out through the gap, then away down the road
+      tx = this.breach.x; tz = this.breach.z; want = 11;
+      // straight on out through the outer fence, bursting the panels in its way
+      for (const p of C.panels) if (p.outer && !p.broken && Math.hypot((p.x0 + p.x1) / 2 - this.x, (p.z0 + p.z1) / 2 - this.z) < 5) { g.park.breakPanel(p.idx, null); for (const c of w.colliders) if (c.rexPanel === p.idx) c.broken = true; }
+      if (Math.hypot(tx - this.x, tz - this.z) < 5) { this.state = 'raid'; this.roar(); }
+    } else if (this.state === 'raid') {
+      // first, the raptor pen: through its fence to let them out
+      const pen = C.pen, tp = pen.panels.reduce((a, b) => (Math.hypot((b.x0 + b.x1) / 2 - this.x, (b.z0 + b.z1) / 2 - this.z) < Math.hypot((a.x0 + a.x1) / 2 - this.x, (a.z0 + a.z1) / 2 - this.z) ? b : a));
+      tx = (tp.x0 + tp.x1) / 2; tz = (tp.z0 + tp.z1) / 2; want = 9;
+      if (Math.hypot(tx - this.x, tz - this.z) < 6) { g.park.breakPen(tp.idx, g.raptors); this.state = 'loose'; this.planTo(-698, -8); this.roar(); }
+    } else {
+      // loose: chase the player when close, otherwise follow the roads into town (and on, from block to block)
+      if (pd < 85) { tx = P.pos.x; tz = P.pos.z; want = 16; }
+      else {
+        while (this.path.length && Math.hypot(this.path[0].x - this.x, this.path[0].z - this.z) < 6) this.path.shift();
+        if (!this.path.length) { const ns = w.nodes.filter((n) => n.city); const n = ns[Math.floor(Math.random() * ns.length)]; this.planTo(n.x, n.z); }
+        if (this.path.length) { tx = this.path[0].x; tz = this.path[0].z; }
+        want = 10;
+      }
+      if (this.roarT <= 0 && pd < 220) { this.roar(); this.roarT = 9 + Math.random() * 8; }
+    }
+    return { tx, tz, want };
+  }
+
+  cage() { const C = this.world.rex; return { x: C.x, z: C.z, half: C.half - 6 }; }
 
   // shove, stomp and tail-swipe the cars around it
   smash(dt, sw) {
@@ -638,6 +723,54 @@ export class TRex {
         else if (this.speed > 3) g.applyDamage(car, Math.min(9, 2 + this.speed * 0.6), car.pos.x - nx, car.pos.z - nz, -nx, -nz, this.speed);
         break;
       }
+    }
+  }
+}
+
+// the raptors: the same build at a third of the size, olive with a dark back, very quick
+export class Raptor extends TRex {
+  constructor(scene, world, game, start, i) {
+    super(scene, world, game, { scale: 0.3, color: 0x7a8450, dark: 0x3a4424, pale: 0xc8be98, lite: true, voice: 0.35 });
+    this.x = start.x; this.z = start.z; this.heading = Math.random() * TAU; this.i = i;
+    this.off = { a: (i / 20) * TAU, r: 6 + (i % 5) * 3 };
+  }
+  place() { this.state = 'caged'; this.path = []; }
+  cage() { const p = this.world.rex.pen; return { x: p.x, z: p.z, half: p.half - 2 }; }
+  roar() { this.jawT = 0.8; const g = this.game, d = Math.hypot(g.player.pos.x - this.x, g.player.pos.z - this.z); if (g.audio.growl && d < 120) g.audio.growl((1 - d / 120) * 0.4); }
+  think(dt, pd, P, C, g, w) {
+    let want = 0, tx = this.x, tz = this.z;
+    if (this.state === 'caged') { // quick darts about the pen
+      const K = this.cage();
+      if (!this.target || this.t <= 0) { this.target = { x: K.x + (Math.random() - 0.5) * K.half * 2, z: K.z + (Math.random() - 0.5) * K.half * 2 }; this.t = 1.5 + Math.random() * 3; }
+      tx = this.target.x; tz = this.target.z; want = Math.hypot(tx - this.x, tz - this.z) < 2 ? 0 : 7;
+    } else if (this.state === 'escaping') {
+      tx = this.breach.x; tz = this.breach.z; want = 12;
+      if (Math.hypot(tx - this.x, tz - this.z) < 3) this.state = 'loose';
+    } else {
+      const rex = g.rex, jitter = Math.sin(this.i * 7.3 + (this.t * 0.1)) * 3;
+      if (pd < 140) { tx = P.pos.x + Math.cos(this.off.a) * 2 + jitter; tz = P.pos.z + Math.sin(this.off.a) * 2; want = 16; } // the pack runs you down
+      else if (rex && rex.state === 'loose' && Math.hypot(rex.x - this.x, rex.z - this.z) < 400) { tx = rex.x + Math.cos(this.off.a) * this.off.r * 2; tz = rex.z + Math.sin(this.off.a) * this.off.r * 2; want = 12; }
+      else {
+        while (this.path.length && Math.hypot(this.path[0].x - this.x, this.path[0].z - this.z) < 4) this.path.shift();
+        if (!this.path.length) { const ns = w.nodes.filter((n) => n.city); const n = ns[Math.floor(Math.random() * ns.length)]; this.planTo(n.x, n.z); }
+        if (this.path.length) { tx = this.path[0].x; tz = this.path[0].z; }
+        want = 11;
+      }
+      if (this.roarT <= 0 && pd < 90) { this.roar(); this.roarT = 3 + Math.random() * 5; }
+    }
+    return { tx, tz, want };
+  }
+  // small but quick: they bump and nip at cars, nothing like the big one
+  smash(dt) {
+    const g = this.game;
+    for (const car of g.cars) {
+      const dx = car.pos.x - this.x, dz = car.pos.z - this.z, d = Math.hypot(dx, dz), reach = car.hx + 0.9;
+      if (d > reach) continue;
+      const nx = dx / (d || 1), nz = dz / (d || 1);
+      car.sleeping = false;
+      car.vel.x += nx * 4 * dt * 8; car.vel.z += nz * 4 * dt * 8;
+      this.x -= nx * (reach - d) * 0.6; this.z -= nz * (reach - d) * 0.6; // they bounce off rather than shove through
+      if (Math.random() < dt * 0.7) g.applyDamage(car, 2.2, car.pos.x - nx, car.pos.z - nz, -nx, -nz, 3); // (a pack chase, not instant death)
     }
   }
 }
