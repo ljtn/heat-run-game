@@ -127,8 +127,18 @@ export class Aircraft {
     this.snd = null;
   }
 
-  update(dt, camera, night, heat = 0) {
+  update(dt, camera, night, heat = 0, follow = null) {
     const cam = camera.position;
+    // a loose dinosaur: a helicopter comes and stays over it, searchlight on it
+    if (follow && !(this.active && this.active.chase)) {
+      if (this.active) { this.active.m.visible = false; this.stopSound(); this.active = null; }
+      const m = this.models.heli, ang = Math.random() * Math.PI * 2;
+      m.visible = true; m.position.set(follow.x + Math.cos(ang) * 700, 120, follow.z + Math.sin(ang) * 700);
+      this.vel.set(0, 0, 0);
+      this.active = { kind: 'heli', m, speed: 30, alt: 60, t: 0, life: 1e9, orbit: -1, orbitAng: ang, bank: 0, chase: true };
+      this.startSound('heli');
+    }
+    if (!follow && this.active && this.active.chase) { this.active.chase = false; this.active.life = this.active.t + 30; }
     const A = this.active;
     if (!A) {
       this.wait -= dt;
@@ -153,9 +163,20 @@ export class Aircraft {
         this.vel.lerp(want, Math.min(1, dt * 0.8));
         if (A.orbit <= 0) { A.orbit = -1; A.life = A.t + 1500 / A.speed; }
       }
-      // keep clear of the ground and the towers
-      const gh = this.world.groundAt(p.x, p.z, 1e9).h;
-      p.y += (Math.max(A.alt, gh + 60) - p.y) * Math.min(1, dt * 0.5);
+      if (A.chase && follow) {
+        // circle the animal, close and low, nose in
+        A.orbitAng += dt * 0.28;
+        const fy = follow.root ? follow.root.position.y : 0;
+        const tx = follow.x + Math.cos(A.orbitAng) * 60, tz = follow.z + Math.sin(A.orbitAng) * 60;
+        const want = new THREE.Vector3(tx - p.x, 0, tz - p.z), dd = want.length();
+        want.normalize().multiplyScalar(Math.min(40, 6 + dd * 0.5));
+        this.vel.lerp(want, Math.min(1, dt * 1.2));
+        p.y += (Math.max(fy + 42, this.world.groundAt(p.x, p.z, 1e9).h + 35) - p.y) * Math.min(1, dt * 0.6);
+      } else {
+        // keep clear of the ground and the towers
+        const gh = this.world.groundAt(p.x, p.z, 1e9).h;
+        p.y += (Math.max(A.alt, gh + 60) - p.y) * Math.min(1, dt * 0.5);
+      }
     }
     p.addScaledVector(this.vel, dt);
     // face the direction of travel, banking into turns
@@ -166,10 +187,11 @@ export class Aircraft {
     // lights
     m.userData.strobe.visible = night && (A.t % 1.2) < 0.08;
     this.navMat[0].color.setScalar(night ? 1 : 0.3).multiply(new THREE.Color(0xff2010));
-    if (A.kind === 'heli' && night) {
-      this.spot.intensity = 9000;
+    if (A.kind === 'heli' && (night || (A.chase && follow))) {
+      this.spot.intensity = night ? 9000 : 2500;
       this.spot.position.copy(p).y -= 1.5;
-      this.spot.target.position.set(cam.x + Math.sin(A.t * 0.7) * 15, cam.y - 2, cam.z + Math.cos(A.t * 0.5) * 15);
+      if (A.chase && follow) this.spot.target.position.set(follow.x, (follow.root ? follow.root.position.y : 0) + 3, follow.z); // the light stays on the animal
+      else this.spot.target.position.set(cam.x + Math.sin(A.t * 0.7) * 15, cam.y - 2, cam.z + Math.cos(A.t * 0.5) * 15);
     } else this.spot.intensity = 0;
     // sound: distance and side
     if (this.snd) {

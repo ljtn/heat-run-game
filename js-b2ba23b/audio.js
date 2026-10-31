@@ -311,6 +311,105 @@ export class AudioEngine {
     }
   }
 
+  // the civil-defence siren: a slow rising and falling wail across town while the dinosaur is loose
+  alarm(on) {
+    if (!this.enabled || !this.ctx) return;
+    const ctx = this.ctx;
+    if (on && !this.alarmSnd) {
+      const o = ctx.createOscillator(), o2 = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+      o.type = 'sawtooth'; o2.type = 'sawtooth'; o.frequency.value = 420; o2.frequency.value = 423;
+      lfo.frequency.value = 0.12; lg.gain.value = 170; lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+      f.type = 'lowpass'; f.frequency.value = 1400;
+      g.gain.value = 0; g.gain.setTargetAtTime(this.muted ? 0 : 0.05, ctx.currentTime, 1.5);
+      o.connect(f); o2.connect(f); f.connect(g).connect(this.master);
+      o.start(); o2.start(); lfo.start();
+      this.alarmSnd = { o, o2, lfo, g };
+    } else if (!on && this.alarmSnd) {
+      const s = this.alarmSnd; this.alarmSnd = null;
+      s.g.gain.setTargetAtTime(0, ctx.currentTime, 1);
+      setTimeout(() => { try { s.o.stop(); s.o2.stop(); s.lfo.stop(); } catch (e) { /* stopped */ } }, 4000);
+    } else if (on && this.alarmSnd) this.alarmSnd.g.gain.setTargetAtTime(this.muted ? 0 : 0.05, ctx.currentTime, 0.5);
+  }
+
+  // the tyrannosaur's roar: a deep sawtooth growl sliding down, a sub rumble, a breathy rasp on top
+  roar(vol = 1) {
+    if (!this.enabled || this.muted || vol < 0.03) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.02, D = 2.6;
+    const out = ctx.createGain(); out.gain.value = Math.min(1, vol) * 0.9; out.connect(this.master);
+    const env = ctx.createGain(); env.gain.setValueAtTime(0, t0); env.gain.linearRampToValueAtTime(1, t0 + 0.35); env.gain.setValueAtTime(0.9, t0 + D * 0.6); env.gain.exponentialRampToValueAtTime(0.001, t0 + D); env.connect(out);
+    for (const [type, f0, f1, g0] of [['sawtooth', 110, 62, 0.35], ['sawtooth', 83, 47, 0.3], ['sine', 42, 30, 0.6]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + D);
+      lfo.frequency.value = 9 + Math.random() * 4; lg.gain.value = f0 * 0.05; lfo.connect(lg).connect(o.frequency);
+      g.gain.value = g0; o.connect(g).connect(env); o.start(t0); lfo.start(t0); o.stop(t0 + D); lfo.stop(t0 + D);
+    }
+    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * D, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    n.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4; bp.frequency.setValueAtTime(700, t0); bp.frequency.exponentialRampToValueAtTime(220, t0 + D);
+    const ng = ctx.createGain(); ng.gain.value = 0.5;
+    n.connect(bp).connect(ng).connect(env); n.start(t0);
+  }
+
+  // a growl to make your skin crawl: a distorted throat rumble with a rattling vocal-fry pulse, a sub-bass you
+  // feel in your chest, ragged breath, all swelling up and dying away in a big echoing space
+  growl(vol = 1) {
+    if (!this.enabled || this.muted || vol < 0.03) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.02, D = 1.8 + Math.random() * 1.0;
+    const out = ctx.createGain(); out.connect(this.master);
+    out.gain.setValueAtTime(0, t0); out.gain.linearRampToValueAtTime(Math.min(1, vol) * 0.95, t0 + D * 0.35); out.gain.setValueAtTime(Math.min(1, vol) * 0.85, t0 + D * 0.7); out.gain.exponentialRampToValueAtTime(0.001, t0 + D);
+    // a big space: a dark feedback echo
+    const dl = ctx.createDelay(1), fb = ctx.createGain(), dlf = ctx.createBiquadFilter();
+    dl.delayTime.value = 0.13; fb.gain.value = 0.42; dlf.type = 'lowpass'; dlf.frequency.value = 600;
+    const bus = ctx.createGain(); bus.connect(out); bus.connect(dl); dl.connect(dlf).connect(fb).connect(dl); dlf.connect(out);
+    // the throat: two detuned buzzing tones, bent up and down, through a hard distortion
+    const shaper = ctx.createWaveShaper(), curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 5) * 0.8; }
+    shaper.curve = curve;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 4;
+    lp.frequency.setValueAtTime(260, t0); lp.frequency.linearRampToValueAtTime(950, t0 + D * 0.4); lp.frequency.exponentialRampToValueAtTime(220, t0 + D);
+    const rattle = ctx.createGain(); rattle.gain.value = 0.55;
+    const fry = ctx.createOscillator(), fryG = ctx.createGain(); fry.type = 'square'; fry.frequency.setValueAtTime(22, t0); fry.frequency.linearRampToValueAtTime(34, t0 + D * 0.5); fry.frequency.linearRampToValueAtTime(18, t0 + D); fryG.gain.value = 0.45;
+    fry.connect(fryG).connect(rattle.gain); // the rattling pulse
+    for (const [type, f0, det] of [['sawtooth', 46, 0], ['sawtooth', 49, 7], ['square', 69, -5]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = type; o.detune.value = det;
+      o.frequency.setValueAtTime(f0 * 0.8, t0); o.frequency.linearRampToValueAtTime(f0 * 1.15, t0 + D * 0.4); o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t0 + D);
+      g.gain.value = 0.3; o.connect(g).connect(shaper); o.start(t0); o.stop(t0 + D);
+    }
+    shaper.connect(lp).connect(rattle).connect(bus);
+    // sub-bass
+    const sub = ctx.createOscillator(), sg = ctx.createGain(); sub.type = 'sine'; sub.frequency.setValueAtTime(28, t0); sub.frequency.linearRampToValueAtTime(36, t0 + D * 0.4); sub.frequency.linearRampToValueAtTime(24, t0 + D); sg.gain.value = 0.9;
+    sub.connect(sg).connect(out); sub.start(t0); sub.stop(t0 + D);
+    // ragged breath through the teeth
+    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * D, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    n.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2; bp.frequency.setValueAtTime(320, t0); bp.frequency.linearRampToValueAtTime(700, t0 + D * 0.4); bp.frequency.exponentialRampToValueAtTime(240, t0 + D);
+    const ng = ctx.createGain(); ng.gain.value = 0.5;
+    n.connect(bp).connect(ng).connect(rattle); n.start(t0);
+    fry.start(t0); fry.stop(t0 + D);
+  }
+
+  // the civil-defence siren: a slow rising and falling wail across town while the dinosaur is loose
+  alarm(on) {
+    if (!this.enabled || !this.ctx) return;
+    const ctx = this.ctx;
+    if (on && !this.alarmSnd) {
+      const o = ctx.createOscillator(), o2 = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+      o.type = 'sawtooth'; o2.type = 'sawtooth'; o.frequency.value = 420; o2.frequency.value = 423;
+      lfo.frequency.value = 0.12; lg.gain.value = 170; lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+      f.type = 'lowpass'; f.frequency.value = 1400;
+      g.gain.value = 0; g.gain.setTargetAtTime(this.muted ? 0 : 0.05, ctx.currentTime, 1.5);
+      o.connect(f); o2.connect(f); f.connect(g).connect(this.master);
+      o.start(); o2.start(); lfo.start();
+      this.alarmSnd = { o, o2, lfo, g };
+    } else if (!on && this.alarmSnd) {
+      const s = this.alarmSnd; this.alarmSnd = null;
+      s.g.gain.setTargetAtTime(0, ctx.currentTime, 1);
+      setTimeout(() => { try { s.o.stop(); s.o2.stop(); s.lfo.stop(); } catch (e) { /* stopped */ } }, 4000);
+    } else if (on && this.alarmSnd) this.alarmSnd.g.gain.setTargetAtTime(this.muted ? 0 : 0.05, ctx.currentTime, 0.5);
+  }
+
   // the tyrannosaur's roar: a deep sawtooth growl sliding down, a sub rumble, a breathy rasp on top
   roar(vol = 1) {
     if (!this.enabled || this.muted || vol < 0.03) return;

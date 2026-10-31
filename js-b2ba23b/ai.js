@@ -240,6 +240,21 @@ export class TrafficManager {
     return d;
   }
 
+  // U-turn: take the opposite lane of this road from here, and keep going away
+  flee(d, m) {
+    const v = d.v, w = this.world, q0 = d.queue[0];
+    d.mode = 'flee'; d.fleeT = 18 + Math.random() * 8; d.aggression = this.panic ? 2.3 : 1.8; d.honkReq = true; v.hazards = true;
+    v.forward(_fw);
+    const towards = (m.x - v.pos.x) * _fw.x + (m.z - v.pos.z) * _fw.z > 0;
+    if (!towards || !q0 || q0.edgeId === undefined || q0.dirId === undefined) return; // already heading away: just floor it
+    const e = w.edges[q0.edgeId], ln = this.lane(e, 1 - q0.dirId);
+    let bi = 0, bd = 1e18;
+    ln.pts.forEach((p, i) => { const dd = (p.x - v.pos.x) ** 2 + (p.z - v.pos.z) ** 2; if (dd < bd) { bd = dd; bi = i; } });
+    d.queue.length = 0;
+    this.appendLane(d, { ...ln, pts: ln.pts.slice(Math.min(bi + 2, ln.pts.length - 1)) });
+    d.lastEdge = e.id;
+  }
+
   routeTo(d, x, z) {
     const w = this.world, v = d.v;
     let start = -1;
@@ -305,10 +320,14 @@ export class TrafficManager {
   }
 
   spawnRoadblock(player) {
-    const w = this.world;
     player.forward(_fw);
     const sp = player.vel.length() > 8 ? player.vel.clone().normalize() : _fw.clone();
-    const tx = player.pos.x + sp.x * 230, tz = player.pos.z + sp.z * 230;
+    this.spawnBlockAt(player.pos.x + sp.x * 230, player.pos.z + sp.z * 230);
+  }
+
+  // a roadblock across the road nearest (tx, tz); dino roadblocks hold until told otherwise
+  spawnBlockAt(tx, tz, dino = false) {
+    const w = this.world;
     let best = null, bd = 1e9;
     for (const e of w.edges) {
       for (let i = 2; i < e.pts.length - 2; i += 2) {
@@ -332,13 +351,14 @@ export class TrafficManager {
       v.resetTo(x, w.groundAt(x, z, p.y + 2).h, z, heading + (s > 0 ? Math.PI : 0) + (Math.random() - 0.5) * 0.4, 0);
       v.sleeping = false; v.damage = 0; v.wrecked = false;
       d.mode = 'block';
-      d.blockT = 35;
+      d.blockT = dino ? 60 : 35;
+      d.dinoBlock = dino;
       d.queue.length = 0;
       d.lastNode = e.b; d.lastEdge = e.id;
       this.drivers.push(d);
       this.game.onSpawn(v);
     }
-    this.game.message('ROADBLOCK AHEAD', 2.5);
+    if (!dino) this.game.message('ROADBLOCK AHEAD', 2.5);
   }
 
   // ---------------- heat ----------------
@@ -638,7 +658,7 @@ export class TrafficManager {
       d.sirenOn = true;
       d.blockT -= dt;
       const dist = v.pos.distanceTo(player.pos);
-      if (d.blockT < 0 || (dist < 28 && this.heat > 0) || this.heat <= 0) {
+      if (d.blockT < 0 || (dist < 28 && this.heat > 0) || (this.heat <= 0 && !d.dinoBlock)) {
         inp.handbrake = 0;
         d.mode = this.heat > 0 ? 'pursuit' : 'patrol';
         d.queue.length = 0;
@@ -710,12 +730,12 @@ export class TrafficManager {
           const nd = this.world.nodes[q[i].stop];
           if (nd.light) {
             const s = this.world.lightState(nd, q[i].axis, this.time);
-            if (d.mode === 'race') pv = Math.min(pv, 14); // racing: lights mean nothing
+            if (d.mode === 'race' || d.mode === 'flee') pv = Math.min(pv, 14); // racing or fleeing: lights mean nothing
             else if (d.sirenOn && (d.role !== 'police' || d.mode === 'respond')) pv = Math.min(pv, 6); // under lights and siren: through the red, carefully
             else if (s === 'R' || (s === 'Y' && acc > 12)) pv = 0;
           }
           // don't block the box: never drive into a junction without room to get out the other side
-          if (pv > 0 && acc < 45 && !d.sirenOn && d.mode !== 'race' && this.boxBlocked(d, q, i, allCars)) pv = 0;
+          if (pv > 0 && acc < 45 && !d.sirenOn && d.mode !== 'race' && d.mode !== 'flee' && this.boxBlocked(d, q, i, allCars)) pv = 0;
         }
       }
       const allowed = Math.sqrt(pv * pv + 2 * decel * Math.max(0, acc - (pv === 0 ? 2 : 0)));
@@ -814,6 +834,14 @@ export class TrafficManager {
       const ct = d.chaseTarget, cd = Math.hypot(ct.x - pos.x, ct.z - pos.z);
       if (cd < 110) { tx = ct.x; tz = ct.z; vDes = Math.max(Math.min(vDes, 16), cd < 20 ? 6 : 14); }
     }
+    // a dinosaur in sight: turn round and get away (honking, hazards on), then calm down after a while
+    if (d.role === 'civ' && this.monsters && this.monsters.length) {
+      if (d.mode === 'flee') { d.fleeT -= dt; if (d.fleeT <= 0) { d.mode = 'cruise'; d.aggression = 1; v.hazards = false; } }
+      else for (const m of this.monsters) {
+        const dx = m.x - pos.x, dz = m.z - pos.z, dd = Math.hypot(dx, dz), ahead = (dx * _fw.x + dz * _fw.z) / (dd || 1);
+        if (dd < (this.panic ? 60 : 25) || (dd < (this.panic ? 150 : 80) && ahead > 0.1)) { this.flee(d, m); break; } // (in a city-wide panic, anyone near gets out)
+      }
+    }
     // pull over for an emergency vehicle coming up behind with its siren on
     if (d.role === 'civ') for (const e of this.emergencies || []) {
       const ev = e.v;
@@ -847,7 +875,7 @@ export class TrafficManager {
         // swerve around traffic
         const side = aheadLat > 0 ? -1 : 1;
         tx += _rt.x * side * 3.5; tz += _rt.z * side * 3.5;
-      } else if (d.mode === 'race' && gap < 22) {
+      } else if ((d.mode === 'race' || d.mode === 'flee') && gap < 22) {
         // racing: dart round whoever is in the way
         const side = aheadLat > 0 ? -1 : 1;
         tx += _rt.x * side * 3.4; tz += _rt.z * side * 3.4;

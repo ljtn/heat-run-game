@@ -61,8 +61,8 @@ function chickenHead() { // pivot at neck base
 }
 
 const SPEC = {
-  sheep: { walk: 1.1, run: 5.5, sep: 1.5, startle: 22, r: 0.6, legLen: 0.48, legs: [[-0.2, -0.38], [0.2, -0.38], [-0.2, 0.36], [0.2, 0.36]], neck: [0, 0.92, -0.5], hipY: 0.5 },
-  chicken: { walk: 0.7, run: 3.6, sep: 0.45, startle: 12, r: 0.22, legLen: 0.2, legs: [[-0.06, 0.02], [0.06, 0.02]], neck: [0, 0.4, -0.16], hipY: 0.2 },
+  sheep: { walk: 1.1, run: 5.5, sep: 3.2, startle: 22, r: 0.6, legLen: 0.48, legs: [[-0.2, -0.38], [0.2, -0.38], [-0.2, 0.36], [0.2, 0.36]], neck: [0, 0.92, -0.5], hipY: 0.5 },
+  chicken: { walk: 0.7, run: 3.6, sep: 1.2, startle: 12, r: 0.22, legLen: 0.2, legs: [[-0.06, 0.02], [0.06, 0.02]], neck: [0, 0.4, -0.16], hipY: 0.2 },
 };
 
 export class Animals {
@@ -118,7 +118,9 @@ export class Animals {
       cx /= pad.animals.length; cz /= pad.animals.length;
       // cars around: what are we scared of?
       const threats = cars.filter((c) => !c.sleeping && Math.abs(c.pos.x - pad.cx) < pad.hx + 70 && Math.abs(c.pos.z - pad.cz) < pad.hz + 70);
-      for (const a of pad.animals) this.step(a, pad, dt, time, cx, cz, threats, camPos, player);
+      // a dinosaur about: much more frightening than any car
+      for (const m of this.predators || []) if (Math.abs(m.x - pad.cx) < pad.hx + 120 && Math.abs(m.z - pad.cz) < pad.hz + 120) threats.push({ pos: { x: m.x, y: m.root.position.y, z: m.z }, vel: { length: () => 14 }, dino: true });
+      for (const a of pad.animals) if (!a.eaten) this.step(a, pad, dt, time, cx, cz, threats, camPos, player);
     }
     this.draw(time, camPos);
     // the odd bleat or cluck nearby
@@ -149,10 +151,10 @@ export class Animals {
     for (const c of threats) {
       const dx = a.x - c.pos.x, dz = a.z - c.pos.z, d = Math.hypot(dx, dz) || 0.01;
       const sp = c.vel.length();
-      const reach = S.startle * (0.5 + Math.min(1, sp / 12));
+      const reach = c.dino ? 70 : S.startle * (0.5 + Math.min(1, sp / 12));
       if (d < reach) { const k = (1 - d / reach) * (0.4 + Math.min(1, sp / 8)); fx += (dx / d) * k; fz += (dz / d) * k; fear = Math.max(fear, k); }
       // hit!
-      if (d < S.r + 1.3 && sp > 2.5 && Math.abs(a.y - c.pos.y) < 2) {
+      if (!c.dino && d < S.r + 1.3 && sp > 2.5 && Math.abs(a.y - c.pos.y) < 2) {
         a.hop = 1; a.vx = c.vel.x * 0.75 + (dx / d) * 2; a.vz = c.vel.z * 0.75 + (dz / d) * 2; a.vy = 2.5 + sp * 0.18; a.spin = (Math.random() - 0.5) * 14; a.y += 0.2;
         if (a.kind === 'sheep') this.effects.debris(a.x, a.y + 0.6, a.z, 0.95, 0.93, 0.88, 14);
         else this.effects.debris(a.x, a.y + 0.3, a.z, a.tint ? 0.97 : 0.7, a.tint ? 0.95 : 0.45, a.tint ? 0.9 : 0.25, 10);
@@ -176,12 +178,14 @@ export class Animals {
     ax += a.wx * want * 0.8;
     if (scared) { ax += fx * S.run * 2.2; az += fz * S.run * 2.2; }
     az += a.wz * want * 0.8;
-    const coh = a.kind === 'sheep' ? (scared ? 0.9 : 0.12) : 0.05;
+    // a loose flock: a gentle pull to the group, and some strays that go their own way
+    if (a.stray === undefined) a.stray = Math.random() < 0.25;
+    const coh = a.stray && !scared ? 0 : a.kind === 'sheep' ? (scared ? 0.5 : 0.04) : 0.015;
     ax += (cx - a.x) * coh; az += (cz - a.z) * coh;
     for (const b of pad.animals) {
       if (b === a) continue;
       const dx = a.x - b.x, dz = a.z - b.z, d2 = dx * dx + dz * dz;
-      if (d2 < S.sep * S.sep && d2 > 1e-6) { const d = Math.sqrt(d2), k = (S.sep - d) / S.sep * 4; ax += (dx / d) * k; az += (dz / d) * k; }
+      if (d2 < S.sep * S.sep && d2 > 1e-6) { const d = Math.sqrt(d2), k = (S.sep - d) / S.sep * 6; ax += (dx / d) * k; az += (dz / d) * k; }
     }
     // accelerate toward the steering target (capped speed)
     const k = Math.min(1, dt * (scared ? 3 : 1.5));
@@ -217,7 +221,7 @@ export class Animals {
     for (const a of this.list) {
       const M = this.mesh[a.set];
       const S = SPEC[a.kind];
-      const visible = a.pad.active && Math.hypot(a.x - camPos.x, a.z - camPos.z) < 300;
+      const visible = !a.eaten && a.pad.active && Math.hypot(a.x - camPos.x, a.z - camPos.z) < 300;
       if (!visible) {
         M.body.setMatrixAt(a.i, this.zero); M.head.setMatrixAt(a.i, this.zero);
         for (let l = 0; l < S.legs.length; l++) M.leg.setMatrixAt(a.i * S.legs.length + l, this.zero);

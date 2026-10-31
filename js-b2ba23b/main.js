@@ -829,7 +829,25 @@ class Game {
     if (this.started && this.state === 'drive') this.updateLoot(dt);
     this.animals.update(dt, this.time, this.camera.position, this.cars, P);
     this.fixtures.update(dt, this.camera.position);
-    this.aircraft.update(dt, this.camera, this.atmo.preset.night, this.traffic.heat || 0);
+    const loose = this.rex && this.rex.state !== 'caged' ? this.rex : this.raptors.find((r) => r.state === 'loose') || null;
+    this.aircraft.update(dt, this.camera, this.atmo.preset.night, this.traffic.heat || 0, loose);
+    // what traffic runs from: the big one and any loose raptors
+    this.traffic.monsters = [this.rex, ...this.raptors].filter((m) => m && m.state !== 'caged');
+    this.animals.predators = this.traffic.monsters;
+    // the alert: a pulsing red banner and flashing screen edges while any of them is out
+    if (!this.dinoAlert) {
+      const el = (this.dinoAlert = document.createElement('div'));
+      el.id = 'dinoAlert';
+      el.innerHTML = '<div class="dinoBanner">&#9888; DINOSAUR ALERT &#9888;<span>STAY IN YOUR VEHICLE</span></div>';
+      const st = document.createElement('style');
+      st.textContent = `#dinoAlert{position:fixed;inset:0;pointer-events:none;z-index:40;display:none;box-shadow:inset 0 0 120px 30px rgba(220,20,20,.0);animation:dinoEdge 1s infinite}
+#dinoAlert .dinoBanner{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:#c81414;color:#fff;font:700 26px/1 'Oswald',Impact,sans-serif;letter-spacing:.18em;padding:10px 26px 8px;border:3px solid #fff;text-align:center;animation:dinoFlash .5s steps(2) infinite}
+#dinoAlert .dinoBanner span{display:block;font-size:13px;letter-spacing:.3em;margin-top:5px;opacity:.9}
+@keyframes dinoFlash{0%{background:#c81414}50%{background:#3a0505}}
+@keyframes dinoEdge{0%,100%{box-shadow:inset 0 0 120px 20px rgba(220,20,20,.0)}50%{box-shadow:inset 0 0 140px 40px rgba(220,20,20,.45)}}`;
+      document.head.appendChild(st); document.body.appendChild(el);
+    }
+    this.dinoAlert.style.display = this.traffic.monsters.length && this.state === 'drive' ? 'block' : 'none';
     this.meshes.signals.update(this.traffic.time);
     this.meshes.mats.water.userData.time.value = this.time;
     this.meshes.trees.updateLod(this.camera.position);
@@ -848,13 +866,28 @@ class Game {
         if (d2 < 900 || r.state !== 'caged') r.update(Math.min(dt, 0.05), this.time);
       }
       // loose: the police are sent after it, again and again
+      // city-wide panic while it's loose: sirens wailing, roadblocks thrown across its path, everyone fleeing
+      const panic = this.rex.state === 'loose';
+      this.traffic.panic = panic;
+      if (this.audio.alarm) this.audio.alarm(panic && this.state === 'drive');
+      if (panic && this.state === 'drive') {
+        this.panicMsgT = (this.panicMsgT || 0) - dt;
+        if (this.panicMsgT <= 0) { this.panicMsgT = 40; this.hud.message('CITY EMERGENCY · DINOSAUR ON THE LOOSE', 3.5, 'crime'); }
+        this.rexBlockT = (this.rexBlockT || 6) - dt;
+        if (this.rexBlockT <= 0) {
+          this.rexBlockT = 20;
+          const ahead = this.rex.path[Math.min(this.rex.path.length - 1, 12)] || { x: this.rex.x + Math.sin(this.rex.heading) * 150, z: this.rex.z + Math.cos(this.rex.heading) * 150 };
+          this.traffic.spawnBlockAt(ahead.x, ahead.z, true);
+          if (this.traffic.drivers.filter((d) => d.dinoBlock).length > 12) { const old = this.traffic.drivers.find((d) => d.dinoBlock); old.dinoBlock = false; } // the oldest stand down
+        }
+      }
       if (this.rex.state === 'loose' && this.state === 'drive') {
         this.rexCallT = (this.rexCallT || 0) - dt;
         if (this.rexCallT <= 0) {
           this.rexCallT = 8;
           const T = this.traffic;
           for (const d of T.drivers) if (d.rexCall) { T.routeTo(d, this.rex.x, this.rex.z); d.chaseTarget = this.rex; }
-          if (T.drivers.filter((d) => d.rexCall).length < 4) { const d = T.spawnEmergency('police', this.player, this.camera, { x: this.rex.x, z: this.rex.z }, true); if (d) { d.rexCall = true; d.chaseTarget = this.rex; } }
+          if (T.drivers.filter((d) => d.rexCall).length < 8) { const d = T.spawnEmergency('police', this.player, this.camera, { x: this.rex.x, z: this.rex.z }, true); if (d) { d.rexCall = true; d.chaseTarget = this.rex; } }
         }
       }
     }

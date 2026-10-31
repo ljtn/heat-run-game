@@ -128,7 +128,7 @@ class Sauropod {
     let want = 0;
     if (this.state === 'walk') {
       const dx = this.target.x - this.x, dz = this.target.z - this.z, d = Math.hypot(dx, dz);
-      want = 1.5;
+      want = 2.3;
       const tgt = Math.atan2(dx, dz);
       let dh = tgt - this.heading; while (dh > Math.PI) dh -= TAU; while (dh < -Math.PI) dh += TAU;
       this.heading += Math.max(-0.14 * dt, Math.min(0.14 * dt, dh));
@@ -452,11 +452,16 @@ export class TRex {
     neck.add(new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10).scale(0.62, 0.55, 1.1).translate(0, -0.25, 1.2), pale)); // the throat
     for (let k = 0; k < 4; k++) neck.add(new THREE.Mesh(new THREE.TorusGeometry(0.86 - k * 0.04, 0.05, 6, 18).rotateY(Math.PI / 2).rotateZ(Math.PI / 2).rotateX(-0.5).translate(0, 0.2 + k * 0.17, 0.35 + k * 0.32), dark)); // skin folds
     const head = (this.head = new THREE.Group()); head.position.set(0, 1.0, 1.7); neck.add(head);
-    const sk = new THREE.BoxGeometry(1.5, 1.35, 3.2, 6, 6, 8), sp = sk.attributes.position;
-    for (let i = 0; i < sp.count; i++) { // narrow snout, broad cheeks, rounded top
-      let x = sp.getX(i), y = sp.getY(i), z = sp.getZ(i); const f = (z + 1.6) / 3.2; // 0 back .. 1 snout
-      x *= 1 - 0.42 * f; y *= 1 - 0.35 * f; y += (y > 0 ? -0.12 * Math.pow(Math.abs(x) / 0.75, 2) : 0);
-      sp.setXYZ(i, x, y + 0.1 * f, z + 1.2);
+    // the skull, sculpted from a sphere: deep and broad behind the eyes, tapering to a lower, narrower, rounded
+    // snout; a gently arched top line and a straight jaw line
+    const sk = new THREE.SphereGeometry(1, 32, 24), sp = sk.attributes.position;
+    for (let i = 0; i < sp.count; i++) {
+      const x = sp.getX(i), y = sp.getY(i), z = sp.getZ(i), f = (z + 1) / 2; // 0 back .. 1 snout tip
+      const w = 0.8 * (1 - 0.46 * Math.pow(f, 1.25)) * (1 + 0.08 * Math.exp(-(((f - 0.25) / 0.12) ** 2))); // cheeks flare behind the eyes
+      const hTop = 0.78 * (1 - 0.42 * f) + 0.06 * Math.sin(f * Math.PI * 1.6); // the brow and the nasal arch
+      const hBot = 0.5 * (1 - 0.3 * f);
+      const yy = y > 0 ? y * hTop : y * hBot;
+      sp.setXYZ(i, x * w * (y > 0 ? 1 - 0.12 * y * y : 1), yy + 0.05, -0.35 + f * 3.3);
     }
     sk.computeVertexNormals();
     head.add(Object.assign(new THREE.Mesh(sk, mat), { castShadow: true }));
@@ -464,23 +469,27 @@ export class TRex {
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8).scale(1, 0.7, 1.2).translate(sx * 0.55, 0.62, 0.55), dark)); // brow horns
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6).translate(sx * 0.62, 0.4, 0.45), new THREE.MeshStandardMaterial({ color: 0xc8a020, emissive: 0x3a2a00, roughness: 0.2 }))); // eyes
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5).translate(sx * 0.22, 0.48, 2.65), dark)); // nostrils
-      for (let k = 0; k < 13; k++) { const L2 = 0.16 + 0.12 * Math.sin((k / 12) * Math.PI) + (k % 3 === 1 ? 0.05 : 0); head.add(new THREE.Mesh(new THREE.ConeGeometry(0.045 + L2 * 0.12, L2, 5).rotateX(Math.PI).translate(sx * (0.64 - k * 0.034), -0.55 - L2 / 2, 0.25 + k * 0.19), tooth)); } // upper teeth, the middle ones longest
+      for (let k = 0; k < 13; k++) { const L2 = 0.16 + 0.12 * Math.sin((k / 12) * Math.PI) + (k % 3 === 1 ? 0.05 : 0), z = 0.35 + k * 0.2, f = (z + 0.35) / 3.3, hw = 0.8 * (1 - 0.46 * Math.pow(f, 1.25)) * 0.86; head.add(new THREE.Mesh(new THREE.ConeGeometry(0.045 + L2 * 0.12, L2, 5).rotateX(Math.PI).translate(sx * hw, 0.05 - 0.5 * (1 - 0.3 * f) * 0.92 - L2 / 2, z), tooth)); } // upper teeth along the skull edge, the middle ones longest
     }
     for (const sx of [-1, 1]) {
       // scaly lips along the upper jaw (the teeth show beneath), cheek bosses, a deep eye socket with a wet glint
-      head.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 2.5).rotateY(sx * 0.12).translate(sx * 0.6, -0.5, 1.3), pale));
+      head.add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 2.6).rotateY(-sx * 0.1).translate(sx * 0.58, -0.38, 1.35), pale));
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8).scale(0.7, 0.9, 1.1).translate(sx * 0.72, -0.15, -0.15), mat));
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8).translate(sx * 0.6, 0.4, 0.43), dark));
       head.add(new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 5).translate(sx * 0.69, 0.43, 0.5), new THREE.MeshBasicMaterial({ color: 0xffffff })));
       for (let k = 0; k < 4; k++) head.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5).translate(sx * (0.35 - k * 0.04), 0.58 - k * 0.04, 1.0 + k * 0.4), dark)); // rough nasal ridge
     }
     const jaw = (this.jawG = new THREE.Group()); jaw.position.set(0, -0.5, -0.1); head.add(jaw);
-    const jg = new THREE.BoxGeometry(1.25, 0.5, 2.9, 4, 2, 6), jp = jg.attributes.position;
-    for (let i = 0; i < jp.count; i++) { const z = jp.getZ(i), f = (z + 1.45) / 2.9; jp.setXYZ(i, jp.getX(i) * (1 - 0.4 * f), jp.getY(i) * (1 - 0.3 * f) - 0.15, z + 1.45); }
+    // the lower jaw: a long rounded U, deepest at the back, a blunt chin
+    const jg = new THREE.SphereGeometry(1, 24, 14), jp = jg.attributes.position; // (closed: a solid jaw, flat on top)
+    for (let i = 0; i < jp.count; i++) {
+      const x = jp.getX(i), y = jp.getY(i), z = jp.getZ(i), f = (z + 1) / 2;
+      jp.setXYZ(i, x * 0.66 * (1 - 0.42 * f), (y > 0 ? y * 0.1 : y * 0.42 * (1 - 0.35 * f)) + 0.05, f * 2.95);
+    }
     jg.computeVertexNormals();
     jaw.add(new THREE.Mesh(jg, pale));
-    jaw.add(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 2.4).translate(0, 0.1, 1.4), mouth));
-    for (const sx of [-1, 1]) for (let k = 0; k < 11; k++) { const L2 = 0.13 + 0.08 * Math.sin((k / 10) * Math.PI); jaw.add(new THREE.Mesh(new THREE.ConeGeometry(0.04, L2, 5).translate(sx * (0.52 - k * 0.032), 0.1 + L2 / 2, 0.35 + k * 0.21), tooth)); }
+    jaw.add(new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8).scale(0.32, 0.07, 1.05).translate(0, 0.1, 1.2), mouth)); // the tongue, lying in the jaw
+    for (const sx of [-1, 1]) for (let k = 0; k < 11; k++) { const L2 = 0.13 + 0.08 * Math.sin((k / 10) * Math.PI), z = 0.3 + k * 0.22, f = z / 2.95; jaw.add(new THREE.Mesh(new THREE.ConeGeometry(0.04, L2, 5).translate(sx * 0.66 * (1 - 0.42 * f) * 0.88, 0.06 + L2 / 2, z), tooth)); } // lower teeth along the jaw rim
     // the famous little arms: two fingers each, folded under the chest
     for (const sx of [-1, 1]) {
       const arm = new THREE.Group(); arm.position.set(sx * 0.95, -0.55, 3.3); pelvis.add(arm);
@@ -589,7 +598,7 @@ export class TRex {
     this.root.position.set(this.x, y, this.z);
     this.root.rotation.y = this.heading;
     // gait: stride length grows with speed (a walk is ~3.4 m, the run longer)
-    const run = Math.min(1, this.speed / 9), amt = Math.min(1, this.speed / 1.5);
+    const run = Math.min(1, this.speed / 12), amt = Math.min(1, this.speed / 1.5);
     const stride = 3.6 + this.speed * 0.45, stance = 0.6 - 0.18 * run, legLen = 4.4 * this.S; // longer strides and less ground time when running
     this.phase = (this.phase + (this.speed / stride) * dt) % 1;
     // the planted foot must travel back exactly as far as the body moves forward meanwhile (or it skates)
@@ -642,7 +651,7 @@ export class TRex {
       seg.rotation.x = k === 0 ? -0.25 - run * 0.08 : 0.03 + f * 0.02;
       seg.rotation.y = Math.sin(time * 1.4 - k * 0.35 + this.phase * TAU) * (0.03 + f * 0.05) * (0.5 + amt) + sw * (0.12 + f * 0.06);
     });
-    if (this.state !== 'caged') this.smash(dt, sw);
+    if (this.state !== 'caged') { this.smash(dt, sw); this.eat(); }
   }
 
   think(dt, pd, P, C, g, w) {
@@ -654,23 +663,25 @@ export class TRex {
       if (Math.hypot(tx - this.x, tz - this.z) < 3) want = 0;
     } else if (this.state === 'escaping') {
       // out through the gap, then away down the road
-      tx = this.breach.x; tz = this.breach.z; want = 11;
+      tx = this.breach.x; tz = this.breach.z; want = 14;
       // straight on out through the outer fence, bursting the panels in its way
       for (const p of C.panels) if (p.outer && !p.broken && Math.hypot((p.x0 + p.x1) / 2 - this.x, (p.z0 + p.z1) / 2 - this.z) < 5) { g.park.breakPanel(p.idx, null); for (const c of w.colliders) if (c.rexPanel === p.idx) c.broken = true; }
       if (Math.hypot(tx - this.x, tz - this.z) < 5) { this.state = 'raid'; this.roar(); }
     } else if (this.state === 'raid') {
       // first, the raptor pen: through its fence to let them out
       const pen = C.pen, tp = pen.panels.reduce((a, b) => (Math.hypot((b.x0 + b.x1) / 2 - this.x, (b.z0 + b.z1) / 2 - this.z) < Math.hypot((a.x0 + a.x1) / 2 - this.x, (a.z0 + a.z1) / 2 - this.z) ? b : a));
-      tx = (tp.x0 + tp.x1) / 2; tz = (tp.z0 + tp.z1) / 2; want = 9;
+      tx = (tp.x0 + tp.x1) / 2; tz = (tp.z0 + tp.z1) / 2; want = 13;
       if (Math.hypot(tx - this.x, tz - this.z) < 6) { g.park.breakPen(tp.idx, g.raptors); this.state = 'loose'; this.planTo(-698, -8); this.roar(); }
     } else {
       // loose: chase the player when close, otherwise follow the roads into town (and on, from block to block)
-      if (pd < 85) { tx = P.pos.x; tz = P.pos.z; want = 16; }
+      const prey = pd >= 85 ? this.nearestPrey(55) : null;
+      if (pd < 85) { tx = P.pos.x; tz = P.pos.z; want = 20; }
+      else if (prey) { tx = prey.x; tz = prey.z; want = 15; } // a meal first
       else {
         while (this.path.length && Math.hypot(this.path[0].x - this.x, this.path[0].z - this.z) < 6) this.path.shift();
         if (!this.path.length) { const ns = w.nodes.filter((n) => n.city); const n = ns[Math.floor(Math.random() * ns.length)]; this.planTo(n.x, n.z); }
         if (this.path.length) { tx = this.path[0].x; tz = this.path[0].z; }
-        want = 10;
+        want = 13;
       }
       if (this.roarT <= 0 && pd < 220) { this.roar(); this.roarT = 9 + Math.random() * 8; }
     }
@@ -678,6 +689,32 @@ export class TRex {
   }
 
   cage() { const C = this.world.rex; return { x: C.x, z: C.z, half: C.half - 6 }; }
+
+  // the nearest sheep or chicken within range (dinosaurs will go out of their way for a meal)
+  nearestPrey(range) {
+    const A = this.game.animals;
+    let best = null, bd = range;
+    for (const a of (A && A.list) || []) { if (a.eaten) continue; const d = Math.hypot(a.x - this.x, a.z - this.z); if (d < bd) { bd = d; best = a; } }
+    return best;
+  }
+
+  // anything that gets within reach of the jaws is eaten
+  eat() {
+    const A = this.game.animals, g = this.game;
+    if (!A || !A.list) return;
+    const reach = this.opts.lite ? 1.4 : 3.5, fwd = this.opts.lite ? 1.6 : 7.5;
+    const mx = this.x + Math.sin(this.heading) * fwd * this.S, mz = this.z + Math.cos(this.heading) * fwd * this.S;
+    for (const a of A.list) {
+      if (a.eaten || Math.hypot(a.x - mx, a.z - mz) > reach) continue;
+      a.eaten = true;
+      this.jawT = this.opts.lite ? 0.5 : 0.9; // a snap of the jaws
+      const ay = a.y + (a.kind === 'sheep' ? 0.6 : 0.3);
+      if (a.kind === 'sheep') g.effects.debris(a.x, ay, a.z, 0.95, 0.93, 0.88, 16); else g.effects.debris(a.x, ay, a.z, 0.97, 0.95, 0.9, 12);
+      const d = Math.hypot(g.player.pos.x - a.x, g.player.pos.z - a.z);
+      if (d < 120 && g.audio.animal) g.audio.animal(a.kind, Math.min(1, 20 / Math.max(10, d)), true);
+      if (d < 160 && g.audio.growl) g.audio.growl((1 - d / 160) * (this.opts.voice || 1));
+    }
+  }
 
   // shove, stomp and tail-swipe the cars around it
   smash(dt, sw) {
@@ -732,31 +769,41 @@ export class Raptor extends TRex {
   constructor(scene, world, game, start, i) {
     super(scene, world, game, { scale: 0.3, color: 0x7a8450, dark: 0x3a4424, pale: 0xc8be98, lite: true, voice: 0.35 });
     this.x = start.x; this.z = start.z; this.heading = Math.random() * TAU; this.i = i;
-    this.off = { a: (i / 20) * TAU, r: 6 + (i % 5) * 3 };
+    this.off = { a: (i / 20) * TAU + Math.random() * 0.5, r: 10 + Math.random() * 25 };
+    this.loner = Math.random() < 0.35; // some break away from the pack and hunt on their own
   }
   place() { this.state = 'caged'; this.path = []; }
   cage() { const p = this.world.rex.pen; return { x: p.x, z: p.z, half: p.half - 2 }; }
   roar() { this.jawT = 0.8; const g = this.game, d = Math.hypot(g.player.pos.x - this.x, g.player.pos.z - this.z); if (g.audio.growl && d < 120) g.audio.growl((1 - d / 120) * 0.4); }
   think(dt, pd, P, C, g, w) {
+    const time = performance.now() / 1000;
     let want = 0, tx = this.x, tz = this.z;
     if (this.state === 'caged') { // quick darts about the pen
       const K = this.cage();
       if (!this.target || this.t <= 0) { this.target = { x: K.x + (Math.random() - 0.5) * K.half * 2, z: K.z + (Math.random() - 0.5) * K.half * 2 }; this.t = 1.5 + Math.random() * 3; }
-      tx = this.target.x; tz = this.target.z; want = Math.hypot(tx - this.x, tz - this.z) < 2 ? 0 : 7;
+      tx = this.target.x; tz = this.target.z; want = Math.hypot(tx - this.x, tz - this.z) < 2 ? 0 : 9;
     } else if (this.state === 'escaping') {
-      tx = this.breach.x; tz = this.breach.z; want = 12;
+      tx = this.breach.x; tz = this.breach.z; want = 16;
       if (Math.hypot(tx - this.x, tz - this.z) < 3) this.state = 'loose';
     } else {
       const rex = g.rex, jitter = Math.sin(this.i * 7.3 + (this.t * 0.1)) * 3;
-      if (pd < 140) { tx = P.pos.x + Math.cos(this.off.a) * 2 + jitter; tz = P.pos.z + Math.sin(this.off.a) * 2; want = 16; } // the pack runs you down
-      else if (rex && rex.state === 'loose' && Math.hypot(rex.x - this.x, rex.z - this.z) < 400) { tx = rex.x + Math.cos(this.off.a) * this.off.r * 2; tz = rex.z + Math.sin(this.off.a) * this.off.r * 2; want = 12; }
+      const prey = pd >= 140 ? this.nearestPrey(45) : null;
+      if (prey) { tx = prey.x; tz = prey.z; want = 19; } // something to eat
+      else if (pd < 140) { const r2 = 3 + (this.i % 4) * 3; tx = P.pos.x + Math.cos(this.off.a + time * 0.3) * r2 + jitter; tz = P.pos.z + Math.sin(this.off.a + time * 0.3) * r2; want = 21; } // they come at you from all sides
+      else if (!this.loner && rex && rex.state === 'loose' && Math.hypot(rex.x - this.x, rex.z - this.z) < 400) { tx = rex.x + Math.cos(this.off.a) * this.off.r; tz = rex.z + Math.sin(this.off.a) * this.off.r; want = 17; }
       else {
         while (this.path.length && Math.hypot(this.path[0].x - this.x, this.path[0].z - this.z) < 4) this.path.shift();
         if (!this.path.length) { const ns = w.nodes.filter((n) => n.city); const n = ns[Math.floor(Math.random() * ns.length)]; this.planTo(n.x, n.z); }
         if (this.path.length) { tx = this.path[0].x; tz = this.path[0].z; }
-        want = 11;
+        want = 15;
       }
       if (this.roarT <= 0 && pd < 90) { this.roar(); this.roarT = 3 + Math.random() * 5; }
+    }
+    // keep a little space from the others (no tight clump)
+    for (const o of g.raptors) {
+      if (o === this) continue;
+      const dx = this.x - o.x, dz = this.z - o.z, d = Math.hypot(dx, dz);
+      if (d < 6 && d > 0.01) { tx += (dx / d) * (6 - d) * 3; tz += (dz / d) * (6 - d) * 3; }
     }
     return { tx, tz, want };
   }
