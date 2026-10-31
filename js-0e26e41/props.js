@@ -565,11 +565,11 @@ export function buildAlleyDressing(world, scene, mats) {
     }
   }
   if (grime.length) {
-    const gm = new THREE.Mesh(mergeGeometries(grime), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
+    const gm = new THREE.Mesh(mergeGeometries(grime), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6 }));
     gm.receiveShadow = true; scene.add(gm);
   }
   if (puddles.length) {
-    const pm = new THREE.Mesh(mergeGeometries(puddles), new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    const pm = new THREE.Mesh(mergeGeometries(puddles), new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -8 }));
     pm.receiveShadow = true; scene.add(pm);
   }
   const add = (list, mat, shadow) => {

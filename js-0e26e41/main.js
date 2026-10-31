@@ -90,7 +90,7 @@ class Game {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = (this.scene = new THREE.Scene());
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 3200);
+    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3200); // (near 0.3: ~3x the depth precision, so ground layers don't need a big bias)
     this.buildMenu();
 
     const progress = (txt, f) => {

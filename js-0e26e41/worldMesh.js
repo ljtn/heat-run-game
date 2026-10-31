@@ -394,7 +394,7 @@ export function buildWorldMeshes(world, scene) {
     const g = roadBuilders[k].geometry();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
       map: roadTex[k], roughness: k === 'dirt' ? 0.95 : 0.82, metalness: 0,
-      transparent: k !== 'city', depthWrite: k === 'city', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      transparent: k !== 'city', depthWrite: k === 'city', polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4, // (no slope-scaled bias: at low angles it paints the road over the tyres)
     }));
     m.receiveShadow = true;
     m.renderOrder = 2;
@@ -408,7 +408,7 @@ export function buildWorldMeshes(world, scene) {
     const hx = nd.hx, hz = nd.hz, y = nd.y + 0.03;
     ib.quad([nd.x - hx, y, nd.z + hz], [nd.x + hx, y, nd.z + hz], [nd.x + hx, y, nd.z - hz], [nd.x - hx, y, nd.z - hz], [[0, 0], [1, 0], [1, 1], [0, 1]]);
   }
-  const interMesh = new THREE.Mesh(ib.geometry(), new THREE.MeshStandardMaterial({ map: TX.intersectionTexture(), roughness: 0.82, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const interMesh = new THREE.Mesh(ib.geometry(), new THREE.MeshStandardMaterial({ map: TX.intersectionTexture(), roughness: 0.82, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -8 }));
   interMesh.receiveShadow = true;
   group.add(interMesh);
 
@@ -470,7 +470,7 @@ export function buildWorldMeshes(world, scene) {
     }
     for (const [x, s] of [[blk.x0, -1], [blk.x1, 1]]) walkB.wall(x, s < 0 ? blk.z0 : blk.z1, s, 0, blk.z1 - blk.z0, Y(x) - 0.4 - CITY.curb, Y(x), 0, 1 / 4, 1 / 4);
   }
-  const bayMesh = new THREE.Mesh(bayB.geometry(), new THREE.MeshStandardMaterial({ map: TX.parkingBayTexture(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const bayMesh = new THREE.Mesh(bayB.geometry(), new THREE.MeshStandardMaterial({ map: TX.parkingBayTexture(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4 }));
   bayMesh.receiveShadow = true;
   group.add(bayMesh);
   const walkMesh = new THREE.Mesh(walkB.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9 }));
@@ -940,10 +940,10 @@ export function buildWorldMeshes(world, scene) {
     wd.transformFrom(wds, h.rot, h.x, h.y, h.z);
   }
   const houseMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: THREE.DoubleSide });
-  const driveMesh = new THREE.Mesh(drive.geometry(), new THREE.MeshStandardMaterial({ color: 0xc9bfa8, map: TX.sidewalkTexture(), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  const driveMesh = new THREE.Mesh(drive.geometry(), new THREE.MeshStandardMaterial({ color: 0xc9bfa8, map: TX.sidewalkTexture(), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6 }));
   driveMesh.receiveShadow = true;
   group.add(driveMesh);
-  const edgeMesh = new THREE.Mesh(edge.geometry(), new THREE.MeshStandardMaterial({ color: 0x8f8a80, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+  const edgeMesh = new THREE.Mesh(edge.geometry(), new THREE.MeshStandardMaterial({ color: 0x8f8a80, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -10 }));
   edgeMesh.receiveShadow = true;
   group.add(edgeMesh);
   mats.winLit = new THREE.MeshStandardMaterial({ color: 0x2a3440, emissive: 0xffc37a, emissiveIntensity: 0, roughness: 0.2, metalness: 0.2 });
@@ -1057,7 +1057,7 @@ export function buildWorldMeshes(world, scene) {
   screenMesh.castShadow = true;
   group.add(screenMesh);
   const scrPos = screenMesh.geometry.attributes.position;
-  const deckMesh = new THREE.Mesh(deckTop.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1 }));
+  const deckMesh = new THREE.Mesh(deckTop.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4 }));
   deckMesh.receiveShadow = true;
   group.add(deckMesh);
   const railMesh = new THREE.Mesh(railB.geometry(), new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide }));
@@ -1666,7 +1666,7 @@ function buildLamps(world, group, mats) {
   const poles = new THREE.InstancedMesh(poleG, poleMat, n);
   const heads = new THREE.InstancedMesh(headG, mats.lampHead, n);
   const poolTex = TX.radialTexture('rgba(255,200,130,0.75)', 'rgba(255,170,90,0)', 128);
-  mats.lampPool = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4 });
+  mats.lampPool = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -12 });
   const poolG = new THREE.PlaneGeometry(20, 20).rotateX(-Math.PI / 2);
   const pools = new THREE.InstancedMesh(poolG, mats.lampPool, n);
   const m4 = new THREE.Matrix4();
