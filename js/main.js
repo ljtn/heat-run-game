@@ -22,7 +22,7 @@ import { HUD, fmtTime } from './hud.js';
 import { CameraRig, CAM_MODES } from './camera.js';
 import { Input } from './input.js';
 import { Atmosphere, PRESETS } from './sky.js';
-import { PropSystem, buildShopSigns, buildAlleyDressing } from './props.js';
+import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting } from './props.js';
 import { Weather } from './weather.js';
 
 const GradeShader = {
@@ -104,6 +104,7 @@ class Game {
     this.props = new PropSystem(world, scene);
     buildShopSigns(world, scene, this.meshes.mats);
     buildAlleyDressing(world, scene, this.meshes.mats);
+    buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
     this.effects = new Effects(scene);
@@ -785,6 +786,7 @@ class Game {
     this.aircraft.update(dt, this.camera, this.atmo.preset.night, this.traffic.heat || 0);
     this.meshes.signals.update(this.traffic.time);
     this.meshes.mats.water.userData.time.value = this.time;
+    if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));
     this.effects.update(dt);

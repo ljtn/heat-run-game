@@ -402,21 +402,39 @@ export function buildAlleyDressing(world, scene, mats) {
         }
       }
     }
-    // laundry lines across the alley
-    for (let t = 8; t < L - 6; t += 7 + R() * 6) {
-      if (R() < 0.35) continue;
-      const y = gy + 6 + R() * 4;
+    // laundry lines across the alley: shirts, trousers, towels and sheets pegged on a sagging line
+    for (let t = 6; t < L - 5; t += 4.5 + R() * 4) {
+      if (R() < 0.18) continue;
+      const y = gy + 5 + R() * 5;
       const p0 = at(t, 0, y), p1 = at(t, 1, y);
-      const line = new THREE.CylinderGeometry(0.015, 0.015, W, 4).rotateZ(Math.PI / 2);
-      if (!vertical) line.rotateY(Math.PI / 2);
-      metal.push(part(line, 0x222222, (p0[0] + p1[0]) / 2, y, (p0[2] + p1[2]) / 2));
-      for (let k = 0; k < 4 + R() * 4; k++) {
-        const f = 0.12 + R() * 0.76;
-        const x = p0[0] + (p1[0] - p0[0]) * f, z = p0[2] + (p1[2] - p0[2]) * f;
-        const w = 0.5 + R() * 0.5, h = 0.5 + R() * 0.5;
-        const g = new THREE.PlaneGeometry(w, h);
-        if (vertical) g.rotateY(Math.PI / 2);
-        cloth.push(part(g, clothCols[Math.floor(R() * clothCols.length)], x, y - h / 2 - 0.02, z));
+      const sagD = 0.3 + W * 0.07 + R() * 0.25, sag = (f) => -(1 - Math.pow(2 * f - 1, 2)) * sagD; // a proper droop under the washing
+      for (let k = 0; k < 12; k++) { // the line, in short pieces so it sags
+        const fa = k / 12, fb = (k + 1) / 12;
+        const xa = p0[0] + (p1[0] - p0[0]) * fa, za = p0[2] + (p1[2] - p0[2]) * fa, xb = p0[0] + (p1[0] - p0[0]) * fb, zb = p0[2] + (p1[2] - p0[2]) * fb;
+        const seg = new THREE.CylinderGeometry(0.012, 0.012, 1, 4);
+        const dx = xb - xa, dy = sag(fb) - sag(fa), dz = zb - za, l = Math.hypot(dx, dy, dz);
+        seg.scale(1, l, 1); seg.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz).normalize()));
+        metal.push(part(seg, 0x2a2a2a, (xa + xb) / 2, y + (sag(fa) + sag(fb)) / 2, (za + zb) / 2));
+      }
+      let f = 0.08 + R() * 0.08;
+      while (f < 0.9) {
+        const x = p0[0] + (p1[0] - p0[0]) * f, z = p0[2] + (p1[2] - p0[2]) * f, yy = y + sag(f) - 0.03;
+        const colr = clothCols[Math.floor(R() * clothCols.length)], kind = R();
+        const pieces = [];
+        let w;
+        if (kind < 0.35) { // shirt: body and sleeves
+          w = 0.55; pieces.push([new THREE.PlaneGeometry(0.5, 0.62), 0, -0.33], [new THREE.PlaneGeometry(0.95, 0.2), 0, -0.12]);
+        } else if (kind < 0.6) { // trousers: two legs from a waistband
+          w = 0.45; pieces.push([new THREE.PlaneGeometry(0.42, 0.14), 0, -0.07], [new THREE.PlaneGeometry(0.18, 0.75), -0.11, -0.5], [new THREE.PlaneGeometry(0.18, 0.75), 0.11, -0.5]);
+        } else if (kind < 0.85) { w = 0.6; pieces.push([new THREE.PlaneGeometry(0.55, 0.8), 0, -0.4]); } // towel
+        else { w = 1.3; pieces.push([new THREE.PlaneGeometry(1.25, 1.1), 0, -0.55]); } // bed sheet
+        for (const [g, ox, oy] of pieces) {
+          g.translate(ox, oy, 0);
+          if (!vertical) g.rotateY(Math.PI / 2); // hang flat along the line
+          g.rotateX((R() - 0.5) * 0.15);
+          cloth.push(part(g, colr, x, yy, z));
+        }
+        f += (w + 0.15 + R() * 0.3) / W;
       }
     }
     // dim wall lamps
@@ -521,6 +539,75 @@ export function buildAlleyDressing(world, scene, mats) {
   add(cloth, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }), true);
   mats.alleyLamp = new THREE.MeshStandardMaterial({ color: 0x777066, emissive: 0xffb866, emissiveIntensity: 0.5 });
   add(lamps, mats.alleyLamp, false);
+}
+
+// strings of bunting across city streets: little triangular flags fluttering between the buildings
+export function buildBunting(world, scene, mats) {
+  const R = mulberry32(31337);
+  const { x0, z0, B, NX, NZ } = CITY;
+  const blockAt = (i, j) => (i >= 0 && j >= 0 && i < NX && j < NZ ? world.blocks[j * NX + i] : null);
+  const pos = [], colArr = [], sway = [];
+  const lineGeo = [];
+  const flagCols = [0xd8261c, 0xf2c419, 0x1f6fd8, 0xf4f2ec, 0x2e9a4a, 0xe87a2a, 0x8a3ad8];
+  const theme = () => { const r = R(); return r < 0.4 ? flagCols : r < 0.7 ? [0xd8261c, 0xf4f2ec, 0x1f6fd8] : [0xf2c419, 0x2e9a4a, 0xd8261c]; };
+  let lines = 0;
+  for (let tries = 0; tries < 400 && lines < 70; tries++) {
+    const h = R() < 0.5;
+    const i = Math.floor(R() * NX), j = 1 + Math.floor(R() * (NZ - 1));
+    // a street between two built-up blocks
+    const b1 = h ? blockAt(i, j - 1) : blockAt(j - 1 < NX ? Math.min(NX - 1, i) : i, 0), b2 = h ? blockAt(i, j) : null;
+    let ax, az, bx, bz;
+    if (h) {
+      if (!b1 || !b2 || b1.kind !== 'build' || b2.kind !== 'build') continue;
+      const x = b1.x0 + 10 + R() * (b1.x1 - b1.x0 - 20);
+      ax = x; az = b1.z1 + CITY.walk; bx = x; bz = b2.z0 - CITY.walk;
+    } else {
+      const ii = 1 + Math.floor(R() * (NX - 1)), jj = Math.floor(R() * NZ);
+      const c1 = blockAt(ii - 1, jj), c2 = blockAt(ii, jj);
+      if (!c1 || !c2 || c1.kind !== 'build' || c2.kind !== 'build') continue;
+      const z = c1.z0 + 10 + R() * (c1.z1 - c1.z0 - 20);
+      ax = c1.x1 + CITY.walk; az = z; bx = c2.x0 - CITY.walk; bz = z;
+    }
+    if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null) continue;
+    const y = CITY.at(ax, az) + 9 + R() * 3, span = Math.hypot(bx - ax, bz - az), sagD = span * (0.1 + R() * 0.05); // a deep, catenary-like droop
+    const cols = theme();
+    const n = Math.floor(span / 0.62);
+    const tx = (bx - ax) / span, tz = (bz - az) / span;
+    for (let k = 0; k <= 16; k++) { // the cord, in enough pieces to curve smoothly
+      const fa = k / 16, fb = Math.min(1, (k + 1) / 16);
+      if (fa >= 1) break;
+      const ya = y - (1 - Math.pow(2 * fa - 1, 2)) * sagD, yb = y - (1 - Math.pow(2 * fb - 1, 2)) * sagD;
+      const g = new THREE.CylinderGeometry(0.015, 0.015, 1, 4), dx = (bx - ax) * (fb - fa), dz = (bz - az) * (fb - fa), dy = yb - ya, l = Math.hypot(dx, dy, dz);
+      g.scale(1, l, 1); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz).normalize()));
+      g.translate(ax + (bx - ax) * (fa + fb) / 2, (ya + yb) / 2, az + (bz - az) * (fa + fb) / 2);
+      lineGeo.push(g);
+    }
+    for (let k = 0; k < n; k++) { // pennants
+      const f = (k + 0.5) / n, cx = ax + (bx - ax) * f, cz = az + (bz - az) * f, cy = y - (1 - Math.pow(2 * f - 1, 2)) * sagD;
+      const c = new THREE.Color(cols[k % cols.length]);
+      const hw = 0.22;
+      for (const [px, py, pz, s] of [[cx - tx * hw, cy, cz - tz * hw, 0], [cx + tx * hw, cy, cz + tz * hw, 0], [cx, cy - 0.5, cz, 1]]) { pos.push(px, py, pz); colArr.push(c.r, c.g, c.b); sway.push(s, cx * 0.7 + cz * 0.5); }
+    }
+    lines++;
+  }
+  if (!pos.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+  g.setAttribute('aSway', new THREE.Float32BufferAttribute(sway, 2));
+  g.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+  const uTime = { value: 0 };
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = uTime;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aSway; uniform float uTime;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.x += aSway.x * 0.16 * sin(uTime * 3.1 + aSway.y);\ntransformed.z += aSway.x * 0.16 * cos(uTime * 2.3 + aSway.y * 1.3);');
+  };
+  mats.buntingTime = uTime;
+  const flags = new THREE.Mesh(g, mat);
+  flags.castShadow = true;
+  scene.add(flags);
+  scene.add(new THREE.Mesh(mergeGeometries(lineGeo), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 })));
 }
 
 // vertical neon blade signs on downtown buildings
