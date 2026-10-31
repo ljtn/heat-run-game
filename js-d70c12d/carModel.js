@@ -100,14 +100,38 @@ export function softSpot(mat) {
     sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin
       .replace('getSpotLightInfo( spotLight, geometryPosition, directLight );', 'getSpotLightInfo( spotLight, geometryPosition, directLight ); directLight.color *= 0.15;'));
   };
-  mat.customProgramCacheKey = () => 'softspot';
+  const prevKey = Object.prototype.hasOwnProperty.call(mat, 'customProgramCacheKey') ? mat.customProgramCacheKey : null;
+  mat.customProgramCacheKey = () => (prevKey ? prevKey() : '') + '|softspot'; // (keep any shader variant the material already had)
   return mat;
+}
+
+// the people's material: per car, so each car's heads and arms can move on their own (the GPU program is shared)
+function folkMaterial() {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+  const rig = { uHead: { value: Array.from({ length: 8 }, () => new THREE.Vector2()) }, uArm: { value: Array.from({ length: 8 }, () => new THREE.Vector2()) } };
+  m.userData.rig = rig;
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uHead = rig.uHead; sh.uniforms.uArm = rig.uArm;
+    sh.vertexShader = 'attribute vec2 aRig; attribute vec3 aPivot; uniform vec2 uHead[8]; uniform vec2 uArm[8];\n' +
+      'vec3 rotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }\n' +
+      'vec3 rotX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }\n' +
+      'vec3 rotZ(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }\n' +
+      sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        int pi = int(aRig.x + 0.5); float part = aRig.y;
+        vec3 d = transformed - aPivot;
+        if (part > 0.5 && part < 1.5) { d = rotX(rotY(d, uHead[pi].x), uHead[pi].y); transformed = aPivot + d; }
+        else if (part > 1.5) { float r = part < 2.5 ? uArm[pi].x : uArm[pi].y, side = part < 2.5 ? -1.0 : 1.0;
+          d = rotZ(rotX(d, r), side * r * 0.25); transformed = aPivot + d; }`);
+  };
+  m.customProgramCacheKey = () => 'folk';
+  return softSpot(m);
 }
 
 const shared = {};
 function sharedMats() {
   if (shared.glass) return shared;
-  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x10161c, roughness: 0.08, metalness: 0.05, envMapIntensity: 0.7, clearcoat: 0.6, clearcoatRoughness: 0.05 });
+  // tinted but see-through, so you can see who's driving
+  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x0e141a, roughness: 0.06, metalness: 0.05, envMapIntensity: 0.8, transparent: true, opacity: 0.62, depthWrite: false });
   shared.tire = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.93, side: THREE.DoubleSide });
   shared.whitewall = new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.7 });
   shared.steel = new THREE.MeshStandardMaterial({ color: 0x2a2b2d, roughness: 0.5, metalness: 0.6 });
@@ -550,6 +574,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     }
     return m;
   });
+  let folkMat = null, folkN = 0;
   // ---- interior: dash, steering wheel, a driver (and sometimes passengers) behind the glass ----
   if (st !== BODY_STYLES.bus || true) {
     const isBus = st === BODY_STYLES.bus;
@@ -564,46 +589,58 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     // seated people: shaped head with a nose, hair (short, long, bald or a cap), neck, tapered torso with shoulders,
     // arms reaching forward (to the wheel for the driver); all of a car's people merge into one mesh
     const folk = [];
-    const tint = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; };
-    const limb = (x0, y0, z0, x1, y1, z1, r, hex) => {
+    // every piece is tagged with its person and part (0 body, 1 head, 2/3 left/right arm) and that part's pivot,
+    // so the vertex shader can turn heads and raise arms without splitting the mesh
+    let pIdx = 0;
+    const tint = (g, hex, part = 0, pv = [0, 0, 0]) => {
+      if (g.index) g = g.toNonIndexed();
+      const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3), rg = new Float32Array(n * 2), pvA = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; rg[i * 2] = pIdx; rg[i * 2 + 1] = part; pvA[i * 3] = pv[0]; pvA[i * 3 + 1] = pv[1]; pvA[i * 3 + 2] = pv[2]; }
+      g.setAttribute('color', new THREE.BufferAttribute(a, 3)); g.setAttribute('aRig', new THREE.BufferAttribute(rg, 2)); g.setAttribute('aPivot', new THREE.BufferAttribute(pvA, 3));
+      return g;
+    };
+    const limb = (x0, y0, z0, x1, y1, z1, r, hex, part, pv) => {
       const L2 = Math.hypot(x1 - x0, y1 - y0, z1 - z0), g = new THREE.CylinderGeometry(r * 0.9, r, L2, 6).translate(0, L2 / 2, 0);
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0).normalize()));
-      folk.push(tint(g.translate(x0, y0, z0), hex));
+      folk.push(tint(g.translate(x0, y0, z0), hex, part, pv));
     };
     const roofEnd = -L / 2 + st.cabEnd * L - st.rakeR - 0.2; // past here the roof slopes down: no room for a head
     const person = (x, z, driver = false) => {
-      if (z > roofEnd || z < z0 + st.rakeF * 0.6) return;
+      if (z > roofEnd || z < z0 + st.rakeF * 0.6 || pIdx > 7) return;
       const skin = pick(skins), shirt = pick(shirts), hair = pick([0x1a1410, 0x3a2414, 0x6a4a28, 0xc8a060, 0x8a8a88, 0x2a1a10]);
-      const hy = headY;
-      folk.push(tint(new THREE.SphereGeometry(0.095, 12, 10).scale(0.88, 1.12, 1).translate(x, hy, z), skin));
-      folk.push(tint(new THREE.BoxGeometry(0.03, 0.05, 0.04).translate(x, hy - 0.01, z - 0.09), skin)); // nose
-      for (const ex of [-1, 1]) folk.push(tint(new THREE.SphereGeometry(0.022, 6, 5).scale(0.6, 1, 1).translate(x + ex * 0.085, hy, z + 0.005), skin)); // ears
+      const hy = headY, neck = [x, hy - 0.12, z + 0.01];
+      const H = (g, hex) => folk.push(tint(g, hex, 1, neck));
+      H(new THREE.SphereGeometry(0.095, 12, 10).scale(0.88, 1.12, 1).translate(x, hy, z), skin);
+      H(new THREE.BoxGeometry(0.03, 0.05, 0.04).translate(x, hy - 0.01, z - 0.09), skin); // nose
+      for (const ex of [-1, 1]) H(new THREE.SphereGeometry(0.022, 6, 5).scale(0.6, 1, 1).translate(x + ex * 0.085, hy, z + 0.005), skin); // ears
       const style = Math.random();
-      if (style < 0.45) folk.push(tint(new THREE.SphereGeometry(0.1, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.9, 1.05, 1.02).translate(x, hy + 0.012, z + 0.012), hair));
+      if (style < 0.45) H(new THREE.SphereGeometry(0.1, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.9, 1.05, 1.02).translate(x, hy + 0.012, z + 0.012), hair);
       else if (style < 0.75) { // long hair down the back
-        folk.push(tint(new THREE.SphereGeometry(0.104, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6).scale(0.92, 1.05, 1.04).translate(x, hy + 0.01, z + 0.01), hair));
-        folk.push(tint(new THREE.BoxGeometry(0.18, 0.22, 0.06).translate(x, hy - 0.1, z + 0.08), hair));
+        H(new THREE.SphereGeometry(0.104, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6).scale(0.92, 1.05, 1.04).translate(x, hy + 0.01, z + 0.01), hair);
+        H(new THREE.BoxGeometry(0.18, 0.22, 0.06).translate(x, hy - 0.1, z + 0.08), hair);
       } else if (style < 0.88) { // a cap
         const cap = pick([0xc81e1e, 0x1e3a6a, 0x2a2a2a, 0xe8e2d4, 0x2e6a3a]);
-        folk.push(tint(new THREE.SphereGeometry(0.102, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.45).translate(x, hy + 0.02, z + 0.005), cap));
-        folk.push(tint(new THREE.BoxGeometry(0.15, 0.015, 0.1).translate(x, hy + 0.045, z - 0.1), cap));
+        H(new THREE.SphereGeometry(0.102, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.45).translate(x, hy + 0.02, z + 0.005), cap);
+        H(new THREE.BoxGeometry(0.15, 0.015, 0.1).translate(x, hy + 0.045, z - 0.1), cap);
       } // (else bald)
       folk.push(tint(new THREE.CylinderGeometry(0.042, 0.048, 0.1, 8).translate(x, hy - 0.14, z + 0.01), skin)); // neck
       folk.push(tint(new THREE.CylinderGeometry(0.19, 0.155, 0.44, 10).scale(1, 1, 0.62).translate(x, hy - 0.4, z + 0.03), shirt)); // torso
       for (const sx of [-1, 1]) {
         folk.push(tint(new THREE.SphereGeometry(0.075, 8, 6).translate(x + sx * 0.18, hy - 0.22, z + 0.03), shirt)); // shoulder
+        const part = sx < 0 ? 2 : 3, sh = [x + sx * 0.19, hy - 0.22, z + 0.03];
         const ex = x + sx * 0.21, ey = hy - 0.47, ez = z - 0.06; // elbow
-        limb(x + sx * 0.19, hy - 0.22, z + 0.03, ex, ey, ez, 0.045, shirt);
+        limb(sh[0], sh[1], sh[2], ex, ey, ez, 0.045, shirt, part, sh);
         const hx = driver ? drvX + sx * 0.15 : x + sx * 0.12, hY = driver ? st.belt + 0.08 : hy - 0.55, hz = driver ? dashZ + 0.3 : z - 0.3;
-        limb(ex, ey, ez, hx, hY, hz, 0.038, skin);
-        folk.push(tint(new THREE.SphereGeometry(0.035, 6, 5).translate(hx, hY, hz), skin)); // hand
+        limb(ex, ey, ez, hx, hY, hz, 0.038, skin, part, sh);
+        folk.push(tint(new THREE.SphereGeometry(0.035, 6, 5).translate(hx, hY, hz), skin, part, sh)); // hand
       }
+      pIdx++;
     };
     person(drvX, zSeat, true);
     if (scheme === 'police' || Math.random() < 0.35) person(-drvX, zSeat);
     if (st.bPillar && !st.cargo && Math.random() < 0.18) person(drvX * 0.9, zSeat + 0.9);
     if (isBus) for (let z = z0 + 2.2; z < L / 2 - 1.0; z += 0.95) if (Math.random() < 0.35) person((Math.random() < 0.5 ? -1 : 1) * W * 0.26, z + 0.05); // riders in the seats
-    if (folk.length) addMesh(model, mergeGeometries(folk), M.folk = M.folk || softSpot(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })), null, false);
+    if (folk.length) { folkMat = folkMaterial(); addMesh(model, mergeGeometries(folk), folkMat, null, false); folkN = pIdx; }
     // wipers parked along the bottom of the windscreen, a rear-view mirror up top
     for (const wx of [-0.28, 0.12]) addMesh(model, new THREE.BoxGeometry(0.5, 0.015, 0.02).rotateZ(0.05).translate(wx * W, st.belt + 0.035, z0 + 0.06), M.black, null, false);
     addMesh(model, boxAt(0.2, 0.06, 0.03, 0, st.roof - 0.12, z0 + st.rakeF * 0.85), M.black, null, false);
@@ -760,7 +797,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   };
   // the cab may carry extra child pieces (none); remember its intact glass
   const parts = { bumperF, bumperR, caps, glass: cab.material };
-  return { breakGlass: tinted, panes, paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
+  return { folk: folkMat ? { mat: folkMat, n: folkN, u: folkMat.userData.rig } : null, breakGlass: tinted, panes, paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
 }
 
 let beamMat = null;

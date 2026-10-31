@@ -576,6 +576,8 @@ class Game {
       // the cars you hit crumple hard: big, wide dents, buckled hoods, scraped paint, bits flying off
       if (isP) deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.5, (dv - 1.5) * (this._treeHit ? 0.06 : 0.04)));
       else deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.85, (dv - 0.8) * 0.085), { R: 1.55, maxOff: 0.8, buckle: 0.55, scuff: 7 });
+      // the people inside throw their arms up and turn toward the hit
+      if (dv > 2.5) { v.gestureT = 3.5; v.gestureSide = mx < 0 ? 1 : -1; }
       // a hard knock shatters a bus's or truck's windows: a shower of glass and the frames left open
       if (v.car.panes && impact > 7) { // (closing speed: a bus hardly budges when you hit it)
         // only the panes near the impact (on that side, within a few metres) give way

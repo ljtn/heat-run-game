@@ -591,6 +591,29 @@ export class Vehicle {
       vw.steer.rotation.y = w.steer;
       vw.spin.rotation.x = w.spinAngle;
     }
+    // the people inside: heads glance about now and then; after a crash, arms up and shaking, heads to the impact
+    const F = this.car.folk;
+    if (F && this.root.visible && !this.lodOn) {
+      const fs = this.folkState || (this.folkState = Array.from({ length: F.n }, () => ({ yaw: 0, pitch: 0, ty: 0, tp: 0, t: Math.random() * 3 })));
+      const g = this.gestureT || 0, now = performance.now() / 1000;
+      if (g > 0) this.gestureT = g - dt;
+      const env = g > 0 ? Math.min(1, (3.5 - g) * 5) * Math.min(1, g * 1.5) : 0;
+      fs.forEach((p, i) => {
+        p.t -= dt;
+        if (p.t <= 0) { // a new thing to look at: mostly ahead, sometimes out of a window or at the mirror
+          p.t = 1.2 + Math.random() * 3.5;
+          const r = Math.random();
+          p.ty = r < 0.5 ? (Math.random() - 0.5) * 0.3 : r < 0.8 ? (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5) : (Math.random() - 0.5) * 1.6;
+          p.tp = (Math.random() - 0.5) * 0.25;
+        }
+        const ty = env > 0 ? (this.gestureSide || 1) * 0.9 + Math.sin(now * 9 + i) * 0.25 : p.ty;
+        p.yaw += (ty - p.yaw) * Math.min(1, dt * (env > 0 ? 8 : 3));
+        p.pitch += ((env > 0 ? -0.15 : p.tp) - p.pitch) * Math.min(1, dt * 3);
+        F.u.uHead.value[i].set(p.yaw, p.pitch);
+        const shake = Math.sin(now * 13 + i * 1.7) * 0.35;
+        F.u.uArm.value[i].set(env * (2.2 + shake), env * (2.2 - shake)); // (positive: up and forward)
+      });
+    }
     // turn signals: 1.5 blinks a second on the side the driver is turning (or both, as hazards)
     if (this.car.indicators) {
       const on = Math.floor(performance.now() / 333) % 2 === 0;
