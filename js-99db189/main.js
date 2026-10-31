@@ -22,6 +22,7 @@ import { HUD, fmtTime } from './hud.js';
 import { CameraRig, CAM_MODES } from './camera.js';
 import { Input } from './input.js';
 import { Atmosphere, PRESETS } from './sky.js';
+import { Tram } from './tram.js';
 import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
@@ -106,6 +107,7 @@ class Game {
     buildAlleyDressing(world, scene, this.meshes.mats);
     buildAdSigns(world, scene, this.meshes.mats);
     buildTerraces(world, scene);
+    this.tram = new Tram(world, scene);
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -311,6 +313,7 @@ class Game {
     if (m.billboard) m.billboard.emissiveIntensity = 0.12 + 0.9 * L;
     m.lampPool.opacity = 0.85 * L;
     m.lampPool.visible = L > 0.01;
+    this.nightMode = !!P.night;
     m.water.color.set(P.night ? 0x0c1a22 : 0x1e3f46); m.poolWater.color.copy(m.water.color);
     const lightsOn = L > 0.3;
     headlightMaterial().emissiveIntensity = lightsOn ? 5 : 0.3;
@@ -790,6 +793,7 @@ class Game {
     this.meshes.signals.update(this.traffic.time);
     this.meshes.mats.water.userData.time.value = this.time;
     this.meshes.trees.updateLod(this.camera.position);
+    this.tram.update(dt, this.nightMode);
     if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));

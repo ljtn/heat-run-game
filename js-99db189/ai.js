@@ -452,7 +452,7 @@ export class TrafficManager {
       const dc = Math.hypot(d.v.pos.x - cp.x, d.v.pos.z - cp.z), dp = Math.hypot(d.v.pos.x - player.pos.x, d.v.pos.z - player.pos.z);
       const near = Math.min(dc, dp);
       if (!d.ghost && near > 115 && d.queue.length && !d.v.isFlipped()) { d.ghost = true; d.v.ghost = true; d.gSpeed = Math.max(0, d.v.speed); }
-      else if (d.ghost && near < 95) this.unghost(d);
+      else if (d.ghost && near < 95) this.unghost(d, allCars);
     }
     for (const d of this.drivers) d.ghost ? this.ghostDrive(d, dt, allCars) : this.drive(d, dt, player, allCars);
     for (const d of this.drivers.filter((x) => x.kill)) { d.kill = false; this.release(d); }
@@ -467,12 +467,22 @@ export class TrafficManager {
     d.cut = now;
   }
 
-  unghost(d) {
+  unghost(d, allCars) {
     const v = d.v;
     d.unghostT = performance.now();
     d.ghost = false; v.ghost = false;
+    // start no faster than the gap to whoever is just ahead allows (a gliding queue packs tighter than real brakes do)
+    let speed = d.gSpeed || 0;
+    v.forward(_fw);
+    for (const o of allCars || []) {
+      if (o === v || o.sleeping) continue;
+      const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z, fwd = dx * _fw.x + dz * _fw.z;
+      if (fwd < 0 || fwd > 25 || Math.abs(dx * _fw.z - dz * _fw.x) > 2.4) continue;
+      const gap = fwd - v.hz - o.hz;
+      speed = Math.min(speed, Math.max(0, o.vel.dot(_fw)) + Math.sqrt(2 * 4 * Math.max(0, gap - 1.5)));
+    }
     const g = this.world.groundAt(v.pos.x, v.pos.z, v.pos.y + 1.5).h;
-    v.resetTo(v.pos.x, g, v.pos.z, v.heading, d.gSpeed || 0);
+    v.resetTo(v.pos.x, g, v.pos.z, v.heading, speed);
   }
 
   ghostDrive(d, dt, allCars) {

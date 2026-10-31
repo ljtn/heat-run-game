@@ -613,7 +613,7 @@ export function buildBunting(world, scene, mats) {
       const z = c1.z0 + 10 + R() * (c1.z1 - c1.z0 - 20);
       ax = c1.x1 + CITY.walk; az = z; bx = c2.x0 - CITY.walk; bz = z;
     }
-    if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null) continue;
+    if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null || world.nearTram((ax + bx) / 2, (az + bz) / 2, 6)) continue;
     const y = CITY.at(ax, az) + 9 + R() * 3;
     // both ends tie to a facade that's actually there and tall enough; otherwise try another street
     const face = (px, pz, dir) => world.buildings.find((b) => (h
