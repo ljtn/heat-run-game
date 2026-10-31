@@ -245,21 +245,59 @@ export function buildWorldMeshes(world, scene) {
 
   // ---------------- water ----------------
   const wn = TX.waterNormals();
+  // water depth over the whole map (0..8 m in a byte), so shallows, shore foam and clarity follow the real bed
+  const DN = NV, depthData = new Uint8Array(DN * DN);
+  for (let j = 0; j < DN; j++) for (let i = 0; i < DN; i++) {
+    const x = -HALF + i * CELL, z = -HALF + j * CELL, k = j * NV + i;
+    const lv = world.sampleGrid(world.waterDist, x, z) < 40 ? world.waterLevelAt(x, z) : WATER;
+    depthData[k] = Math.max(0, Math.min(255, ((lv - world.heights[k]) / 8) * 255));
+  }
+  const depthTex = new THREE.DataTexture(depthData, DN, DN, THREE.RedFormat, THREE.UnsignedByteType);
+  depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
+  depthTex.unpackAlignment = 1; // (961 bytes a row)
+  depthTex.needsUpdate = true;
   const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x1e3f46, roughness: 0.07, metalness: 0.0, normalMap: wn, normalScale: new THREE.Vector2(0.22, 0.22),
-    transparent: true, opacity: 0.86, envMapIntensity: 1.25,
+    color: 0x1e3f46, roughness: 0.24, metalness: 0.0, normalMap: wn, normalScale: new THREE.Vector2(0.26, 0.26),
+    transparent: true, opacity: 0.9, envMapIntensity: 1.0,
   });
   waterMat.userData.time = { value: 0 };
-  waterMat.onBeforeCompile = (sh) => {
+  waterMat.onBeforeCompile = function (sh) {
     sh.uniforms.uTime = waterMat.userData.time;
-    sh.fragmentShader = 'uniform float uTime;\n' + sh.fragmentShader.replace('#include <normal_fragment_maps>', `
+    const flat = !!this.userData.flat; // pools and fountains: no map depth, just clear water
+    sh.uniforms.uDepth = { value: depthTex };
+    sh.uniforms.uMap = { value: new THREE.Vector2(HALF, SIZE) };
+    sh.vertexShader = 'varying vec3 vWPos;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'uniform float uTime; uniform sampler2D uDepth; uniform vec2 uMap; varying vec3 vWPos;\n' + sh.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      // depth: clear, sandy-green shallows grading into the dark deep colour
+      float wDepth = ${flat ? '1.4' : 'texture2D(uDepth, (vWPos.xz + uMap.x) / uMap.y).r * 8.0'};
+      float deepF = smoothstep(0.0, 3.5, wDepth);
+      vec3 shallowC = diffuseColor.rgb * 1.35 + vec3(0.04, 0.06, 0.03);
+      diffuseColor.rgb = mix(shallowC, diffuseColor.rgb * 0.85, deepF);
+      // foam lapping at the shore, broken up and drifting
+      float fn = texture2D(normalMap, vWPos.xz * 0.045 + vec2(uTime * 0.02, -uTime * 0.013)).r;
+      float band = 0.5 + 0.5 * sin(wDepth * 9.0 - uTime * 1.6 + fn * 5.0);
+      float foam = (1.0 - smoothstep(0.0, 0.45, wDepth)) * smoothstep(0.35, 0.8, band * fn + (1.0 - smoothstep(0.0, 0.12, wDepth)) * 0.6);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.9, 0.9), foam * 0.75);
+      diffuseColor.a *= mix(0.62, 1.0, smoothstep(0.0, 1.8, wDepth)) + foam * 0.3;`)
+      .replace('#include <normal_fragment_maps>', `
       vec3 n1 = texture2D(normalMap, vNormalMapUv * 0.37 + vec2(uTime * 0.011, uTime * 0.007)).xyz * 2.0 - 1.0;
       vec3 n2 = texture2D(normalMap, vNormalMapUv * 1.13 + vec2(-uTime * 0.023, uTime * 0.017)).xyz * 2.0 - 1.0;
       vec3 n3 = texture2D(normalMap, vNormalMapUv * 0.071 + vec2(uTime * 0.003, -uTime * 0.002)).xyz * 2.0 - 1.0;
-      vec3 mapN = normalize(vec3((n1.xy * 0.6 + n2.xy * 0.5 + n3.xy * 0.8) * normalScale, 1.0));
+      vec3 n4 = texture2D(normalMap, vNormalMapUv * 2.9 + vec2(uTime * 0.05, uTime * 0.041)).xyz * 2.0 - 1.0;
+      vec3 mapN = normalize(vec3((n1.xy * 0.6 + n2.xy * 0.5 + n3.xy * 0.8 + n4.xy * 0.25) * normalScale, 1.0));
       normal = normalize(tbn * mapN);
-    `);
+    `)
+      // a touch of fresnel: grazing angles mirror the sky, looking down you see into the water
+      .replace('#include <opaque_fragment>', `
+      float fres = pow(clamp(1.0 - abs(dot(normalize(-vViewPosition), normal)), 0.0, 1.0), 4.0);
+      outgoingLight *= 0.8 + 0.3 * fres; // darker looking straight down, brighter towards the horizon
+      diffuseColor.a = clamp(diffuseColor.a + fres * 0.25, 0.0, 1.0);
+      #include <opaque_fragment>`);
   };
+  waterMat.customProgramCacheKey = function () { return this.userData.flat ? 'waterflat' : 'water'; };
+  const poolWater = waterMat.clone();
+  poolWater.userData = { time: waterMat.userData.time, flat: true };
   const wgeo = new THREE.PlaneGeometry(SIZE, SIZE, 1, 1);
   wgeo.rotateX(-Math.PI / 2);
   const uvA = wgeo.attributes.uv;
@@ -269,7 +307,20 @@ export function buildWorldMeshes(world, scene) {
   water.receiveShadow = true;
   water.renderOrder = 1;
   group.add(water);
-  mats.water = waterMat;
+  // the ponds and tarns, each at its own level
+  for (const p of world.ponds) {
+    const rr = p.r * Math.max(p.sx, p.sz) * 1.45 + 12;
+    const pg = new THREE.CircleGeometry(rr, 48);
+    pg.rotateX(-Math.PI / 2);
+    const pos = pg.attributes.position, uv = pg.attributes.uv;
+    for (let q = 0; q < uv.count; q++) uv.setXY(q, (pos.getX(q) + p.x + HALF) / 14, (-(pos.getZ(q) + p.z) + HALF) / 14);
+    const pm = new THREE.Mesh(pg, waterMat);
+    pm.position.set(p.x, p.level, p.z);
+    pm.receiveShadow = true;
+    pm.renderOrder = 1;
+    group.add(pm);
+  }
+  mats.water = waterMat; mats.poolWater = poolWater;
 
   // ---------------- roads ----------------
   const roadTex = { city: TX.roadTexture('city'), avenue: TX.roadTexture('avenue'), highway: TX.roadTexture('highway'), road: TX.roadTexture('road'), mountain: TX.roadTexture('mountain'), dirt: TX.roadTexture('dirt'), village: TX.roadTexture('village') };
@@ -652,7 +703,7 @@ export function buildWorldMeshes(world, scene) {
     basin.position.set(x, yTop + 0.45, z);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(7.5, 0.3, 8, 40), fmat);
     rim.rotation.x = Math.PI / 2; rim.position.set(x, yTop + 0.9, z);
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(7.4, 32), waterMat);
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(7.4, 32), poolWater);
     pool.rotation.x = -Math.PI / 2; pool.position.set(x, yTop + 0.7, z);
     const col = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.0, 3.5, 12), fmat);
     col.position.set(x, yTop + 1.75, z);

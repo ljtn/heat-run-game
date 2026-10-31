@@ -308,7 +308,7 @@ class Game {
     if (m.billboard) m.billboard.emissiveIntensity = 0.12 + 0.9 * L;
     m.lampPool.opacity = 0.85 * L;
     m.lampPool.visible = L > 0.01;
-    m.water.color.set(P.night ? 0x0c1a22 : 0x1e3f46);
+    m.water.color.set(P.night ? 0x0c1a22 : 0x1e3f46); m.poolWater.color.copy(m.water.color);
     const lightsOn = L > 0.3;
     headlightMaterial().emissiveIntensity = lightsOn ? 5 : 0.3;
     this.spotPower = lightsOn ? 380 * L : 0;
@@ -630,7 +630,7 @@ class Game {
     this.resetCool = 1.5;
     const g = this.world.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.5);
     const nr = this.world.nearestRoad(p.pos.x, p.pos.z);
-    if (p.inWater > 0 || g.h < WATER + 0.5) {
+    if (p.inWater > 0 || g.h < this.world.waterLevelAt(p.pos.x, p.pos.z) + 0.5) {
       this.spawnPlayer(p.pos.clone());
     } else {
       p.resetTo(p.pos.x, g.h + 0.5, p.pos.z, p.heading, 0);
@@ -732,9 +732,9 @@ class Game {
     // water entry splash
     const wasIn = this.wasInWater || false;
     const inNow = P.inWater > -0.3;
-    if (inNow && !wasIn && P.vel.length() > 3) { this.effects.splash(P.pos.x, WATER + 0.2, P.pos.z, P.vel.length()); this.audio.splash(); }
+    if (inNow && !wasIn && P.vel.length() > 3) { this.effects.splash(P.pos.x, this.world.waterLevelAt(P.pos.x, P.pos.z) + 0.2, P.pos.z, P.vel.length()); this.audio.splash(); }
     this.wasInWater = inNow;
-    if (inNow && P.vel.length() > 2 && Math.random() < 0.5) this.effects.splash(P.pos.x, WATER + 0.1, P.pos.z, 3);
+    if (inNow && P.vel.length() > 2 && Math.random() < 0.5) this.effects.splash(P.pos.x, this.world.waterLevelAt(P.pos.x, P.pos.z) + 0.1, P.pos.z, 3);
 
     // repair workshops: stop inside one to fix the car (and lose the heat if no cop sees you)
     this.updateWorkshops(dt);

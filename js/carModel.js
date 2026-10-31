@@ -54,7 +54,7 @@ function sharedMats() {
   shared.tire = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.93, side: THREE.DoubleSide });
   shared.whitewall = new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.7 });
   shared.steel = new THREE.MeshStandardMaterial({ color: 0x2a2b2d, roughness: 0.5, metalness: 0.6 });
-  shared.chrome = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.08, metalness: 1.0, envMapIntensity: 1.4 });
+  shared.chrome = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.1, metalness: 1.0, envMapIntensity: 1.2 });
   shared.black = new THREE.MeshStandardMaterial({ color: 0x0e0e0f, roughness: 0.55 });
   shared.grille = new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.35, metalness: 0.7 });
   shared.under = new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 1, side: THREE.DoubleSide });
@@ -71,7 +71,9 @@ const paintCache = new Map();
 function paint(hex) {
   if (!paintCache.has(hex)) {
     paintCache.set(hex, new THREE.MeshPhysicalMaterial({
-      color: hex, vertexColors: true, roughness: 0.38, metalness: 0.2, clearcoat: 0.7, clearcoatRoughness: 0.12,
+      // a duller base coat (no broad sheet of sun across a whole panel) under a thin, sharp clearcoat:
+      // the sun and sky show up as small crisp glints on curves and edges instead
+      color: hex, vertexColors: true, roughness: 0.58, metalness: 0.08, clearcoat: 0.45, clearcoatRoughness: 0.05, envMapIntensity: 0.75,
     }));
   }
   return paintCache.get(hex);

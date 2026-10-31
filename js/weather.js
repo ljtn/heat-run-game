@@ -219,7 +219,7 @@ class Birds {
       }
       F.ang += F.spd * dt;
       const fx = F.cx + Math.cos(F.ang) * F.r, fz = F.cz + Math.sin(F.ang) * F.r;
-      const ground = Math.max(WATER, this.world.terrainHeight(fx, fz));
+      const ground = Math.max(this.world.waterLevelAt(fx, fz), this.world.terrainHeight(fx, fz));
       const heading = F.ang + (F.spd > 0 ? Math.PI / 2 : -Math.PI / 2);
       for (const m of F.members) {
         m.w += dt * 0.8;

@@ -174,10 +174,14 @@ export class World {
     progress('Laying roads', 0.12); await yieldFrame();
     this.buildRoadNetwork();
     this.buildRoadField();
+    this.placePonds();
     progress('Raising hills', 0.2); await yieldFrame();
     this.buildBaseTerrain();
+    // the ponds count as water for everything placed later (trees, houses, farms, props)
+    for (let k = 0; k < this.waterDist.length; k++) if (this.pondDist[k] < this.waterDist[k]) this.waterDist[k] = this.pondDist[k];
     this.profileRoads();
     this.blendForks();
+    this.flattenJunctions();
     this.findTunnels();
     progress('Grading roads', 0.4); await yieldFrame();
     this.stampRoads();
@@ -261,6 +265,60 @@ export class World {
         if (lb < wd[k]) wd[k] = lb;
       }
     }
+  }
+
+  // ---------- ponds and tarns: still water sitting in its own basin up in the hills ----------
+  pondBank(p, x, z) {
+    const dx = x - p.x, dz = z - p.z, ang = Math.atan2(dz, dx);
+    return Math.hypot(dx / p.sx, dz / p.sz) - p.r * (1 + 0.22 * this.noiseC(Math.cos(ang) * 1.6 + p.seed, Math.sin(ang) * 1.6) + 0.08 * this.noiseD(Math.cos(ang) * 4 + p.seed, Math.sin(ang) * 4));
+  }
+
+  placePonds() {
+    const R = mulberry32(4242), vil = [[700, -900], [1050, 550], [-950, 1150], [-1250, -1250]];
+    this.ponds = [];
+    for (let tries = 0; tries < 3000 && this.ponds.length < 14; tries++) {
+      const x = (R() * 2 - 1) * (HALF - 320), z = (R() * 2 - 1) * (HALF - 320);
+      const r = this.ponds.length < 4 ? 70 + R() * 50 : 26 + R() * 40;
+      const reach = r * 1.6 + 40;
+      if (this.inCityRect(x, z, 260 + reach) || this.roadFieldAt(x, z) < reach + 25) continue;
+      if (vil.some(([vx, vz]) => Math.hypot(x - vx, z - vz) < 330 + reach)) continue;
+      if (this.ponds.some((o) => Math.hypot(x - o.x, z - o.z) < reach + o.r * 1.6 + 120)) continue;
+      if (this.sampleGrid(this.waterDist, x, z) < reach + 80) continue;
+      if (PEAKS.some((P) => Math.hypot(x - P.x, z - P.z) < (P.plat[1] ? P.R * P.stretch : P.R * 0.6) + reach)) continue; // (the summit roads aren't in the road field)
+      const st = 1 + R() * 0.5, sx = R() < 0.5 ? st : 1, sz = sx === 1 ? st : 1;
+      // the rim: the water stands a little below its lowest point, so it can't spill out
+      let lo = 1e9, hi = -1e9;
+      for (let a = 0; a < 32; a++) for (const rr of [1.4, 1.8, 2.3]) {
+        const px = x + Math.cos(a / 32 * 6.283) * r * rr * sx, pz = z + Math.sin(a / 32 * 6.283) * r * rr * sz;
+        const wv = smoothstep(0, 340, this.sampleGrid(this.waterDist, px, pz)); // (as buildBaseTerrain will shape it)
+        const h = lerp(3, this.baseHeight(px, pz), wv * wv) + this.peakHeight(px, pz);
+        lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      if (lo < 9 || hi - lo > 45 + r * 0.4) continue; // not down by the river, not on a hillside
+      this.ponds.push({ x, z, r, sx, sz, level: lo - 0.9, seed: R() * 50 });
+    }
+    // their distance field (negative = in the water)
+    const pd = (this.pondDist = new Float32Array(NV * NV).fill(1e9));
+    for (const p of this.ponds) {
+      const ext = p.r * 2.2 + 130;
+      const i0 = Math.max(0, Math.floor((p.x - ext + HALF) / CELL)), i1 = Math.min(N, Math.ceil((p.x + ext + HALF) / CELL));
+      const j0 = Math.max(0, Math.floor((p.z - ext + HALF) / CELL)), j1 = Math.min(N, Math.ceil((p.z + ext + HALF) / CELL));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const k = j * NV + i, d = this.pondBank(p, -HALF + i * CELL, -HALF + j * CELL);
+        if (d < pd[k]) pd[k] = d;
+      }
+    }
+  }
+
+  // the water surface height here (the river/lake level, or a pond's)
+  waterLevelAt(x, z) {
+    const p = this.pondAt(x, z, 10);
+    return p ? p.level : WATER;
+  }
+
+  pondAt(x, z, margin) {
+    for (const p of this.ponds) if (Math.abs(x - p.x) < p.r * 2.6 + margin + 10 && Math.abs(z - p.z) < p.r * 2.6 + margin + 10 && this.pondBank(p, x, z) < margin) return p;
+    return null;
   }
 
   // coarse distance-to-road field (20 m grid) used to carve valleys/passes for the roads
@@ -398,6 +456,15 @@ export class World {
         if (w < 0) h = lerp(0.6, -4.5, smoothstep(0, 14, -w));
         else if (w < 30) h = lerp(0.6, h, smoothstep(0, 30, w));
         if (h > 0.6 && w < 6) h = Math.min(h, 0.6 + w * 0.5);
+        const pw = this.pondDist[k];
+        if (pw < 90) {
+          const lv = this.pondAt(x, z, 95).level;
+          if (pw < 0) h = Math.min(h, lv - 0.4 - 4.2 * smoothstep(0, 22, -pw)); // a shelving bed
+          else {
+            h = Math.min(h, lv + 0.35 + pw * 0.06 + smoothstep(8, 75, pw) * 140); // low, grassy banks
+            h += Math.max(0, lv + 0.45 + pw * 0.05 - h) * (1 - smoothstep(40, 90, pw)); // and a gentle lip where the land dips
+          }
+        }
         H[k] = h;
       }
     }
@@ -696,10 +763,10 @@ export class World {
     const H = this.heights;
     for (const nd of this.nodes) nd.y = nd.city ? CITY.at(nd.x, nd.z) : nd.elevFn ? (nd.elevY = nd.elevFn(nd)) : nd.elevY !== undefined ? nd.elevY : Math.max(1.8, this.sampleGrid(H, nd.x, nd.z));
     // keep junction heights within a drivable grade of their neighbours (city nodes are fixed)
-    for (let pass = 0; pass < 30; pass++) {
+    for (let pass = 0; pass < 300; pass++) {
       for (const e of this.edges) {
         const A = this.nodes[e.a], B = this.nodes[e.b];
-        const g = (e.type === 'highway' ? 0.07 : 0.09) * e.len;
+        const g = (e.type === 'highway' ? 0.07 : 0.09) * Math.max(e.len * 0.4, e.len - 60); // (minus the level junction pads at each end)
         if (!A.city && A.elevY === undefined) A.y = clamp(A.y, B.y - g, B.y + g);
         if (!B.city && B.elevY === undefined) B.y = clamp(B.y, A.y - g, A.y + g);
       }
@@ -929,6 +996,41 @@ export class World {
       }
     }
     return null;
+  }
+
+  // country junctions are level pads: every road eases in to the junction height, so crossing on a hillside
+  // doesn't leave one road's surface standing proud of the other's in the middle of the crossing
+  flattenJunctions() {
+    const touched = new Set();
+    for (const nd of this.nodes) {
+      if (nd.city || nd.elevY !== undefined || nd.edges.length < 3) continue;
+      const es = nd.edges.map((id) => this.edges[id]).filter((e) => !e.elev);
+      const R0 = Math.max(...es.map((e) => e.halfW)) + 5;
+      for (const e of es) {
+        // how far the road climbs away from the junction decides how long the easing is (≤ ~9% extra grade)
+        let rise = 0;
+        for (const p of e.pts) { const d = Math.hypot(p.x - nd.x, p.z - nd.z); if (d < R0 + 30) rise = Math.max(rise, Math.abs(p.y - nd.y)); }
+        const R1 = R0 + Math.max(25, rise * 12);
+        for (const p of e.pts) {
+          const d = Math.hypot(p.x - nd.x, p.z - nd.z);
+          if (d < R1) { const t = smoothstep(R0, R1, d); p.y = lerp(nd.y, p.y, t); }
+          if (d < R0) p.pad = true;
+        }
+        touched.add(e);
+      }
+    }
+    // then keep every eased road drivable end to end (both ends pinned to their junctions)
+    for (const e of touched) {
+      const P = e.pts, n = P.length, g = e.type === 'highway' ? 0.08 : 0.13;
+      const lim = (i, j) => g * Math.hypot(P[i].x - P[j].x, P[i].z - P[j].z);
+      for (const pinned of [true, false]) { // (if the pads leave too little room, let them tilt rather than leave a step)
+        for (let i = 1; i < n - 1; i++) if (!(pinned && P[i].pad)) P[i].y = clamp(P[i].y, P[i - 1].y - lim(i, i - 1), P[i - 1].y + lim(i, i - 1));
+        for (let i = n - 2; i > 0; i--) if (!(pinned && P[i].pad)) P[i].y = clamp(P[i].y, P[i + 1].y - lim(i, i + 1), P[i + 1].y + lim(i, i + 1));
+        let ok = true;
+        for (let i = 1; i < n; i++) if (Math.abs(P[i].y - P[i - 1].y) > lim(i, i - 1) * 1.2 + 0.01) ok = false;
+        if (ok) break;
+      }
+    }
   }
 
   // fork branches share the main road's height while they run alongside it

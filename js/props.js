@@ -409,8 +409,25 @@ export function buildAlleyDressing(world, scene, mats) {
     // laundry lines across the alley: shirts, trousers, towels and sheets pegged on a sagging line
     for (let t = 6; t < L - 5; t += 4.5 + R() * 4) {
       if (R() < 0.18) continue;
-      const y = gy + 5 + R() * 5;
+      let y = gy + 5 + R() * 5;
+      // each end ties to the wall it faces, or to a wooden pole where there's no building tall enough
+      const ends = [0, 1].map((s) => sideBld[s].find((b) => {
+        const lo = vertical ? b.z - b.hz : b.x - b.hx, hi = vertical ? b.z + b.hz : b.x + b.hx, c = (vertical ? a.z0 : a.x0) + t;
+        return lo < c - 0.6 && hi > c + 0.6 && (b.y ?? gy) + b.h > y + 1;
+      }));
+      if (!ends[0] && !ends[1]) continue;
       const p0 = at(t, 0, y), p1 = at(t, 1, y);
+      for (let s = 0; s < 2; s++) {
+        const pt = s ? p1 : p0, b = ends[s], k = vertical ? 0 : 2, inward = s ? -1 : 1;
+        if (b) pt[k] = vertical ? (s ? b.x - b.hx : b.x + b.hx) : (s ? b.z - b.hz : b.z + b.hz);
+        else {
+          pt[k] += inward * 0.35;
+          const [px, , pz] = pt;
+          metal.push(part(new THREE.CylinderGeometry(0.06, 0.08, y - gy + 0.4, 6), 0x5a4532, px, (y + gy + 0.4) / 2, pz));
+          metal.push(vertical ? box(0.07, 0.07, 0.7, 0x5a4532, px, y + 0.1, pz) : box(0.7, 0.07, 0.07, 0x5a4532, px, y + 0.1, pz));
+        }
+      }
+      const W = Math.abs(vertical ? p1[0] - p0[0] : p1[2] - p0[2]);
       const sagD = 0.3 + W * 0.07 + R() * 0.25, sag = (f) => -(1 - Math.pow(2 * f - 1, 2)) * sagD; // a proper droop under the washing
       for (let k = 0; k < 12; k++) { // the line, in short pieces so it sags
         const fa = k / 12, fb = (k + 1) / 12;
@@ -573,7 +590,15 @@ export function buildBunting(world, scene, mats) {
       ax = c1.x1 + CITY.walk; az = z; bx = c2.x0 - CITY.walk; bz = z;
     }
     if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null) continue;
-    const y = CITY.at(ax, az) + 9 + R() * 3, span = Math.hypot(bx - ax, bz - az), sagD = span * (0.1 + R() * 0.05); // a deep, catenary-like droop
+    const y = CITY.at(ax, az) + 9 + R() * 3;
+    // both ends tie to a facade that's actually there and tall enough; otherwise try another street
+    const face = (px, pz, dir) => world.buildings.find((b) => (h
+      ? Math.abs(px - b.x) < b.hx - 0.6 && Math.abs((dir > 0 ? b.z - b.hz : b.z + b.hz) - pz) < CITY.walk + 4
+      : Math.abs(pz - b.z) < b.hz - 0.6 && Math.abs((dir > 0 ? b.x - b.hx : b.x + b.hx) - px) < CITY.walk + 4) && (b.y ?? CITY.at(b.x, b.z)) + b.h > y + 1);
+    const fa = face(ax, az, -1), fb = face(bx, bz, 1);
+    if (!fa || !fb) continue;
+    if (h) { az = fa.z + fa.hz; bz = fb.z - fb.hz; } else { ax = fa.x + fa.hx; bx = fb.x - fb.hx; }
+    const span = Math.hypot(bx - ax, bz - az), sagD = span * (0.1 + R() * 0.05); // a deep, catenary-like droop
     const cols = theme();
     const n = Math.floor(span / 0.62);
     const tx = (bx - ax) / span, tz = (bz - az) / span;

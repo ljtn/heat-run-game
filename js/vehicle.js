@@ -540,7 +540,7 @@ export class Vehicle {
     }
 
     // ---- water ----
-    const sub = WATER - (this.pos.y - 0.2);
+    const sub = this.world.waterLevelAt(this.pos.x, this.pos.z) - (this.pos.y - 0.2);
     this.inWater = sub;
     if (sub > 0) {
       const f = Math.min(sub, 1.3) / 1.3;
