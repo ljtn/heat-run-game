@@ -113,6 +113,7 @@ export class HUD {
       return 'MERIDIAN CITY';
     }
     for (const v of w.villages) if (Math.hypot(p.x - v.x, p.z - v.z) < v.r) return v.name.toUpperCase();
+    for (const f of w.farms || []) if (p.x > f.x0 && p.x < f.x1 && p.z > f.z0 && p.z < f.z1) return f.name;
     for (const P of PEAKS) if (Math.hypot(p.x - P.x, p.z - P.z) < P.R * 0.85) return P.name;
     if (w.lakeBank(p.x, p.z) < 120) return 'LAKE CORVIN';
     if (w.terrainHeight(p.x, p.z) > 70) return 'HIGH RIDGE';
@@ -251,6 +252,11 @@ export class HUD {
     ctx.textAlign = 'center';
     ctx.fillText('MERIDIAN CITY', tx(CITY.cx), tx(CITY.z0) - 14);
     for (const v of this.world.villages) ctx.fillText(v.name.toUpperCase(), tx(v.x), tx(v.z) - 18);
+    ctx.save(); ctx.font = '600 13px Oswald, sans-serif'; ctx.fillStyle = '#e8d6a0';
+    for (const f of this.world.farms || []) { ctx.fillText('🐑 ' + f.name, tx(f.cx), tx(f.cz)); }
+    ctx.fillStyle = 'rgba(240,236,220,0.9)';
+    for (const p of this.world.paddocks || []) { ctx.beginPath(); ctx.arc(tx(p.cx), tx(p.cz), 2.5, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
     ctx.fillText('LAKE CORVIN', tx(640), tx(1090));
     for (const ws of this.world.workshops || []) wrench(ctx, tx(ws.x), tx(ws.z), 9);
     for (const d of g.traffic.drivers) {

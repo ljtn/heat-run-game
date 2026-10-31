@@ -142,7 +142,10 @@ export function buildWorldMeshes(world, scene) {
       if (s === SURF.SAND) tmp.copy(colSand).lerp(colDirt, Math.max(0, n1) * 0.4);
       else if (s === SURF.ROCK) tmp.copy(colRock).lerp(colRock2, n1 * 0.5 + 0.5);
       else if (s === SURF.SNOW) tmp.copy(colSnow).lerp(colSnow2, clamp(n1 * 0.5 + 0.5, 0, 1) * 0.6);
-      else if (s === SURF.FIELD) {
+      else if (s === SURF.FIELD && world.fields && world.fields.some((f) => x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1)) {
+        const fl = world.fields.find((f) => x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1);
+        tmp.copy(fl.crop === 'wheat' ? lin(0x9a7a3a) : lin(0x5a4030)).multiplyScalar(0.85 + 0.25 * (Math.sin(z * 2.9) * 0.5 + 0.5));
+      } else if (s === SURF.FIELD) {
         const fn = world.noiseD(x / 140 + 50, z / 140);
         tmp.copy(fn > 0.25 ? colField1 : fn > -0.15 ? colField2 : colField3);
         const stripe = Math.sin((x * 0.6 + z * 0.25)) * 0.5 + 0.5;
@@ -1057,6 +1060,101 @@ export function buildWorldMeshes(world, scene) {
     group.add(tm);
     mats.tunnelLight = new THREE.MeshStandardMaterial({ color: 0x553311, emissive: 0xffa040, emissiveIntensity: 3 });
     group.add(new THREE.Mesh(lb.geometry(), mats.tunnelLight));
+  }
+
+  // ---------------- farms: barns, silos, tractors, crops ----------------
+  if (world.farms && world.farms.length) {
+    const fb = new GeoBuilder(true), cropB = new GeoBuilder(true);
+    const red = lin(0x9a2a1e), white = lin(0xf2efe6), grey = lin(0x4a4f55), wood = lin(0x7a5532), dark = lin(0x2a2a2a);
+    for (const f of world.farms) {
+      // --- barn (local: x across the gable ends, doors at x = +-hw) ---
+      const b = f.barn, s0 = fb.count, hw = b.w / 2, hd = b.d / 2, WH = 5, KY = 7.4, TY = 9.2, KZ = hd * 0.55, DW = b.door, DH = 4.4;
+      fb.box(0, -hd + 0.15, hw, 0.15, -1, WH, 1, 1, false, red); fb.box(0, hd - 0.15, hw, 0.15, -1, WH, 1, 1, false, red);
+      for (const sd of [-1, 1]) {
+        const x = sd * hw;
+        fb.box(x, -(hd + DW) / 2, 0.15, (hd - DW) / 2, -1, WH, 1, 1, false, red); fb.box(x, (hd + DW) / 2, 0.15, (hd - DW) / 2, -1, WH, 1, 1, false, red);
+        fb.box(x, 0, 0.15, DW, DH, WH, 1, 1, false, red); // over the doorway
+        // gable (pentagon) above the walls
+        const P = [[x, WH, hd], [x, KY, KZ], [x, TY, 0], [x, KY, -KZ], [x, WH, -hd]];
+        for (let k = 1; k < 4; k++) fb.tri(P[0], P[k], P[k + 1], null, red);
+        // white trim round the doorway and the hay-loft door
+        fb.box(x + sd * 0.17, -DW - 0.12, 0.05, 0.12, 0, DH, 1, 1, false, white); fb.box(x + sd * 0.17, DW + 0.12, 0.05, 0.12, 0, DH, 1, 1, false, white);
+        fb.box(x + sd * 0.17, 0, 0.05, DW + 0.24, DH, DH + 0.24, 1, 1, false, white);
+        fb.box(x + sd * 0.17, 0, 0.05, 1.0, 5.6, 7.0, 1, 1, false, white); fb.box(x + sd * 0.2, 0, 0.04, 0.85, 5.75, 6.85, 1, 1, false, wood);
+        // big sliding doors, slid open to either side, with the white X bracing
+        for (const dz of [-1, 1]) {
+          const zc = dz * (DW + 1.6);
+          fb.box(x + sd * 0.35, zc, 0.07, 1.55, 0.1, DH, 1, 1, false, red);
+          fb.box(x + sd * 0.43, zc, 0.03, 1.55, DH - 0.15, DH, 1, 1, false, white); fb.box(x + sd * 0.43, zc, 0.03, 1.55, 0.1, 0.25, 1, 1, false, white);
+        }
+      }
+      for (const sd of [-1, 1]) { // roof: gambrel slopes
+        const a = [-hw - 0.4, WH - 0.1, sd * (hd + 0.4)], bb = [hw + 0.4, WH - 0.1, sd * (hd + 0.4)], c = [hw + 0.4, KY, sd * KZ], d = [-hw - 0.4, KY, sd * KZ], e = [hw + 0.4, TY, 0], g = [-hw - 0.4, TY, 0];
+        fb.quad(a, bb, c, d, null, grey); fb.quad(d, c, e, g, null, grey);
+      }
+      fb.box(0, 0, hw - 0.2, hd - 0.2, -0.05, 0.08, 1, 1, true, lin(0x8a7a5a)); // packed floor
+      for (let k = -3; k <= 3; k++) fb.box(k * 3, -hd + 0.32, 0.04, 0.02, 0.5, WH - 0.2, 1, 1, false, lin(0x7a2418)); // board lines
+      fb.transformFrom(s0, b.rot, b.x, b.y, b.z);
+      // --- silo: bands, dome, ladder ---
+      const S = f.silo, s1 = fb.count;
+      const cylG = new THREE.CylinderGeometry(S.r, S.r, S.h, 20, 1, true);
+      const addGeo = (geo, col, dx, dy, dz) => { const g = geo.index ? geo.toNonIndexed() : geo; const p = g.attributes.position, nn = g.attributes.normal; for (let i = 0; i < p.count; i += 3) fb.tri([p.getX(i) + dx, p.getY(i) + dy, p.getZ(i) + dz], [p.getX(i + 1) + dx, p.getY(i + 1) + dy, p.getZ(i + 1) + dz], [p.getX(i + 2) + dx, p.getY(i + 2) + dy, p.getZ(i + 2) + dz], null, col); void nn; };
+      addGeo(cylG, lin(0xd8dade), 0, S.h / 2, 0);
+      for (let k = 1; k < 5; k++) addGeo(new THREE.CylinderGeometry(S.r + 0.05, S.r + 0.05, 0.25, 20, 1, true), lin(0x3a5a8a), 0, k * S.h / 5, 0);
+      addGeo(new THREE.SphereGeometry(S.r, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), lin(0xb8bcc2), 0, S.h, 0);
+      for (const sd of [-0.25, 0.25]) addGeo(new THREE.BoxGeometry(0.06, S.h, 0.06), dark, sd, S.h / 2, S.r + 0.25);
+      for (let y = 0.4; y < S.h; y += 0.5) addGeo(new THREE.BoxGeometry(0.5, 0.04, 0.04), dark, 0, y, S.r + 0.25);
+      for (let i = s1; i < fb.count; i++) { fb.p[i * 3] += S.x; fb.p[i * 3 + 1] += S.y; fb.p[i * 3 + 2] += S.z; }
+      // --- tractor: big rear wheels, small fronts, red body, cab ---
+      const T = f.tractor, s2 = fb.count, tr = lin(0xc0281e), tire = lin(0x1a1a1a), rim = lin(0xe8c22a);
+      fb.box(0, -0.3, 0.55, 1.5, 0.75, 1.65, 1, 1, true, tr); // bonnet
+      fb.box(0, 0.95, 0.75, 0.7, 0.75, 1.75, 1, 1, true, tr); // body under the cab
+      for (const [x0, x1] of [[-0.75, -0.68], [0.68, 0.75]]) for (const [z0, z1] of [[0.3, 0.38], [1.55, 1.63]]) fb.box((x0 + x1) / 2, (z0 + z1) / 2, 0.04, 0.04, 1.75, 3.0, 1, 1, false, dark); // cab posts
+      fb.box(0, 0.95, 0.85, 0.8, 3.0, 3.12, 1, 1, true, lin(0xf2efe6)); // cab roof
+      fb.box(0.3, -1.5, 0.06, 0.06, 1.6, 2.6, 1, 1, true, dark); // exhaust
+      for (const [x, z, r, w] of [[-0.95, 0.95, 0.85, 0.45], [0.95, 0.95, 0.85, 0.45], [-0.75, -1.35, 0.45, 0.28], [0.75, -1.35, 0.45, 0.28]]) {
+        addGeo(new THREE.CylinderGeometry(r, r, w, 16).rotateZ(Math.PI / 2), tire, x, r, z);
+        addGeo(new THREE.CylinderGeometry(r * 0.55, r * 0.55, w + 0.02, 12).rotateZ(Math.PI / 2), rim, x, r, z);
+      }
+      fb.transformFrom(s2, T.rot, T.x, T.y, T.z);
+      // --- crops ---
+      for (const fl of world.fields.filter((q) => q.x0 >= f.x0 - 1 && q.x1 <= f.x1 + 1 && q.z0 >= f.z0 - 1 && q.z1 <= f.z1 + 1)) {
+        if (fl.crop === 'wheat') {
+          // a golden carpet of wheat, waist high, following the ground
+          const nx = Math.ceil((fl.x1 - fl.x0) / 3), nz = Math.ceil((fl.z1 - fl.z0) / 3);
+          const Y = (x, z) => world.terrainHeight(x, z) + 0.95 + Math.sin(x * 0.7 + z * 0.4) * 0.06;
+          for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+            const xa = fl.x0 + ((fl.x1 - fl.x0) * i) / nx, xb = fl.x0 + ((fl.x1 - fl.x0) * (i + 1)) / nx, za = fl.z0 + ((fl.z1 - fl.z0) * j) / nz, zb = fl.z0 + ((fl.z1 - fl.z0) * (j + 1)) / nz;
+            const cc = lin(0xd8b45a).clone().multiplyScalar(0.85 + Math.random() * 0.25);
+            cropB.quad([xa, Y(xa, zb), zb], [xb, Y(xb, zb), zb], [xb, Y(xb, za), za], [xa, Y(xa, za), za], null, cc);
+          }
+          for (const [ax, az, bx, bz] of [[fl.x0, fl.z0, fl.x1, fl.z0], [fl.x1, fl.z1, fl.x0, fl.z1], [fl.x0, fl.z1, fl.x0, fl.z0], [fl.x1, fl.z0, fl.x1, fl.z1]]) {
+            const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 3);
+            for (let k = 0; k < n; k++) { const t0 = k / n, t1 = (k + 1) / n, xa = ax + (bx - ax) * t0, za = az + (bz - az) * t0, xb = ax + (bx - ax) * t1, zb = az + (bz - az) * t1; cropB.quad([xa, world.terrainHeight(xa, za), za], [xb, world.terrainHeight(xb, zb), zb], [xb, Y(xb, zb), zb], [xa, Y(xa, za), za], null, lin(0xb8923a)); }
+          }
+        } else {
+          // potato / cabbage: green lumpy rows over brown furrows
+          const green = lin(fl.crop === 'cabbage' ? 0x7aa04a : 0x3f6b2a), gap = fl.crop === 'cabbage' ? 1.4 : 1.1;
+          for (let z = fl.z0 + 1; z < fl.z1 - 1; z += gap * 1.6) {
+            let px = fl.x0 + 1, py = world.terrainHeight(px, z);
+            for (let x = fl.x0 + 1 + gap; x < fl.x1 - 1; x += gap) {
+              const h0 = world.terrainHeight(x, z), bump = 0.35 + (Math.sin(x * 3.1 + z) * 0.5 + 0.5) * 0.25;
+              const w = fl.crop === 'cabbage' ? 0.42 : 0.32;
+              // each plant: a little pyramid tent of leaves
+              cropB.tri([px, py + 0.05, z - w], [x, h0 + 0.05, z - w], [(px + x) / 2, (py + h0) / 2 + bump, z], null, green);
+              cropB.tri([x, h0 + 0.05, z + w], [px, py + 0.05, z + w], [(px + x) / 2, (py + h0) / 2 + bump, z], null, green);
+              px = x; py = h0;
+            }
+          }
+        }
+      }
+    }
+    const fm = new THREE.Mesh(fb.geometry(), houseMat);
+    fm.castShadow = true; fm.receiveShadow = true;
+    group.add(fm);
+    const cm = new THREE.Mesh(cropB.geometry(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
+    cm.receiveShadow = true;
+    group.add(cm);
   }
 
   // ---------------- covered streets (city tunnels) ----------------

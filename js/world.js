@@ -186,6 +186,7 @@ export class World {
     progress('Building the city', 0.5); await yieldFrame();
     this.buildCity();
     this.buildVillages();
+    this.buildFarms();
     // driveway cars: settle them on the final ground, and drop any left on a slope they'd roll down
     for (const h of this.houses) {
       if (!h.parked) continue;
@@ -1394,6 +1395,105 @@ export class World {
     return this.onRampPath(x, z, m);
   }
 
+  // farms out in the country: farmhouse, a drive-through barn, silo, tractor, hay bales, animals and crop fields
+  buildFarms() {
+    const R = this.rand;
+    this.farms = [];
+    this.fields = [];
+    const names = ['MILLER', 'HOLLOWAY', 'BRIGGS', 'DALE', 'ASHCROFT', 'PEMBERTON', 'GREENWOOD', 'TALLIS'];
+    const FW = 190, FD = 140; // farm footprint
+    const clear = (x0, z0, x1, z1) => {
+      for (let x = x0; x <= x1; x += 15) for (let z = z0; z <= z1; z += 15) {
+        if (this.inCityRect(x, z, 100) || this.roadDistance(x, z) < 6 || this.sampleGrid(this.waterDist, x, z) < 20 || this.houseOverlaps(x, z, 14) || this.excluded(x, z, 2)) return false;
+        if (this.terrainHeight(x, z) > 140 || PEAKS.some((P) => Math.hypot(x - P.x, z - P.z) < P.R * 0.9)) return false;
+      }
+      for (const v of this.villages) if (x1 > v.x - v.r && x0 < v.x + v.r && z1 > v.z - v.r && z0 < v.z + v.r) return false;
+      return !this.farms.some((f) => x1 > f.x0 - 30 && x0 < f.x1 + 30 && z1 > f.z0 - 30 && z0 < f.z1 + 30);
+    };
+    const cands = [];
+    for (const e of this.edges) {
+      if (e.city || e.elev || e.type === 'highway' || e.type === 'mountain') continue;
+      for (let i = 20; i < e.pts.length - 20; i += 9) cands.push(e.pts[i]);
+    }
+    for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
+    for (const p of cands) {
+      if (this.farms.length >= 7) break;
+      // the farm sits beside the road: try the four sides of the point
+      // the farmyard + pens (140 x 64) must sit clear beside the road; fields are added wherever they fit
+      const opts = [];
+      for (const off of [14, 26]) for (const [sx0, sz0] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) opts.push([sx0, sz0, off]);
+      for (const [sx, sz, off] of opts) {
+        const nearX = p.x + sx * off - (sx > 0 ? 0 : 0), nearZ = p.z - sz * 20;
+        const L = (u, v) => [nearX + sx * u, nearZ + sz * v]; // farm-local, u/v measured into the farm from the road corner
+        const [ca, cb] = [L(0, 0), L(140, 64)];
+        const x0 = Math.min(ca[0], cb[0]), x1 = Math.max(ca[0], cb[0]), z0 = Math.min(ca[1], cb[1]), z1 = Math.max(ca[1], cb[1]);
+        if (!clear(x0, z0, x1, z1)) continue;
+        const yard = [L(0, 0), L(70, 60)];
+        const yx0 = Math.min(yard[0][0], yard[1][0]), yx1 = Math.max(yard[0][0], yard[1][0]), yz0 = Math.min(yard[0][1], yard[1][1]), yz1 = Math.max(yard[0][1], yard[1][1]);
+        const hs = []; for (let x = yx0; x <= yx1; x += 10) for (let z = yz0; z <= yz1; z += 10) hs.push(this.terrainHeight(x, z));
+        if (Math.max(...hs) - Math.min(...hs) > 9) continue;
+        const yy = hs.reduce((a, b) => a + b, 0) / hs.length;
+        const farm = { name: names[this.farms.length % names.length] + ' FARM', x0, z0, x1, z1, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, y: yy, pens: [], bales: [] };
+        void FW; void FD;
+        // level the yard (cut and fill, blending into the land)
+        const H = this.heights;
+        for (let j = Math.floor((yz0 - 14 + HALF) / CELL); j <= Math.ceil((yz1 + 14 + HALF) / CELL); j++) for (let i = Math.floor((yx0 - 14 + HALF) / CELL); i <= Math.ceil((yx1 + 14 + HALF) / CELL); i++) {
+          if (i < 0 || j < 0 || i > N || j > N) continue;
+          const x = -HALF + i * CELL, z = -HALF + j * CELL, d = Math.hypot(Math.max(yx0 - x, 0, x - yx1), Math.max(yz0 - z, 0, z - yz1));
+          const wgt = (1 - smoothstep(0, 14, d)) * smoothstep(3, 8, this.roadDistance(x, z));
+          H[j * NV + i] = lerp(H[j * NV + i], yy, wgt);
+          if (d < 1) this.surf[j * NV + i] = SURF.DIRT;
+        }
+        // farmhouse facing the road, barn behind it, silo, tractor, bales
+        const face = (x, z) => Math.atan2(p.x - x, p.z - z); // front door toward the road point
+        const [hx, hz] = L(16, 16);
+        const house = this.addHouse(hx, hz, face(hx, hz), yy, false, 'farmhouse');
+        house.roadGap = 14;
+        const [bx, bz] = L(44, 30);
+        farm.barn = { x: bx, z: bz, w: 22, d: 14, y: yy, rot: sx * sz > 0 ? 0 : Math.PI / 2 };
+        this.addBarn(farm.barn);
+        const [sx2, sz2] = L(60, 50);
+        farm.silo = { x: sx2, z: sz2, r: 3.4, h: 15, y: yy };
+        this.colliders.push({ type: 'circle', x: sx2, z: sz2, r: 3.5, top: yy + 18, tall: true });
+        const [tx, tz] = L(30, 12);
+        farm.tractor = { x: tx, z: tz, y: yy, rot: R() * 6.28 };
+        this.colliders.push({ type: 'box', x: tx, z: tz, hx: 1.25, hz: 2.2, c: Math.cos(farm.tractor.rot), s: -Math.sin(farm.tractor.rot), top: yy + 2.8, tall: true });
+        for (let k = 0; k < 7; k++) { const [bx2, bz2] = L(26 + R() * 30, 44 + R() * 12); farm.bales.push({ x: bx2, z: bz2, rot: R() * 6.28 }); }
+        // animals
+        const [px, pz] = L(108, 26); farm.pens.push({ kind: 'sheep', cx: px, cz: pz, hx: 26, hz: 18 });
+        const [cx2, cz2] = L(14, 46); farm.pens.push({ kind: 'chicken', cx: cx2, cz: cz2, hx: 7, hz: 5 });
+        // crop fields across the back of the farm, rows running along u
+        const crops = ['potato', 'cabbage', 'wheat'];
+        let fieldsMade = 0;
+        for (const [u0, v0, u1, v1] of [[2, 70, 80, 128], [86, 70, 164, 128], [146, 2, 210, 60], [-74, 2, -8, 60]]) {
+          const [ax, az] = L(u0, v0), [bx3, bz3] = L(u1, v1);
+          const f = { x0: Math.min(ax, bx3), x1: Math.max(ax, bx3), z0: Math.min(az, bz3), z1: Math.max(az, bz3), crop: crops[Math.floor(R() * crops.length)], rowsAlongX: true };
+          if (fieldsMade >= 3 || !clear(f.x0, f.z0, f.x1, f.z1) || this.fields.some((q) => f.x1 > q.x0 && f.x0 < q.x1 && f.z1 > q.z0 && f.z0 < q.z1)) continue;
+          fieldsMade++;
+          farm.x0 = Math.min(farm.x0, f.x0); farm.x1 = Math.max(farm.x1, f.x1); farm.z0 = Math.min(farm.z0, f.z0); farm.z1 = Math.max(farm.z1, f.z1);
+          this.fields.push(f);
+          for (let x = f.x0; x <= f.x1; x += CELL) for (let z = f.z0; z <= f.z1; z += CELL) { const k2 = Math.round((z + HALF) / CELL) * NV + Math.round((x + HALF) / CELL); if (k2 >= 0 && k2 < this.surf.length) this.surf[k2] = SURF.FIELD; }
+        }
+        farm.cx = (farm.x0 + farm.x1) / 2; farm.cz = (farm.z0 + farm.z1) / 2;
+        this.excl.push({ x0: farm.x0 - 4, x1: farm.x1 + 4, z0: farm.z0 - 4, z1: farm.z1 + 4 });
+        this.farms.push(farm);
+        break;
+      }
+    }
+  }
+
+  // a big gambrel barn you can drive straight through: open doors at both gable ends
+  addBarn(b) {
+    const c = Math.cos(b.rot), s = -Math.sin(b.rot);
+    const W = (lx, lz) => [b.x + lx * c + lz * Math.sin(b.rot), b.z - lx * Math.sin(b.rot) + lz * c];
+    const wall = (lx, lz, hx, hz, extra = {}) => { const [x, z] = W(lx, lz); this.colliders.push({ type: 'box', x, z, hx, hz, c, s, top: b.y + 9, tall: true, ...extra }); };
+    const hw = b.w / 2, hd = b.d / 2, door = 3.2;
+    wall(0, -hd, hw, 0.25); wall(0, hd, hw, 0.25); // long side walls
+    for (const sd of [-1, 1]) { wall(sd * hw, -(hd + door) / 2, 0.25, (hd - door) / 2); wall(sd * hw, (hd + door) / 2, 0.25, (hd - door) / 2); } // gable ends either side of the big doors
+    wall(0, 0, hw, hd, { top: b.y + 9.5, bottom: b.y + 4.6 }); // roof / loft
+    b.door = door;
+  }
+
   // café parklets: in the kerb strip outside a café, a U of wooden planters round tables and chairs under a big sun roof
   buildParklets() {
     const R = this.rand;
@@ -1478,8 +1578,9 @@ export class World {
   buildPaddocks() {
     const R = this.rand;
     this.paddocks = [];
-    const tryPlace = (kind, cx, cz) => {
-      const hx = kind === 'sheep' ? 18 + R() * 8 : 6 + R() * 2, hz = kind === 'sheep' ? 13 + R() * 6 : 4.5 + R() * 1.5;
+    const tryPlace = (kind, cx, cz, fixed = null) => {
+      const hx = fixed ? fixed[0] : kind === 'sheep' ? 18 + R() * 8 : 6 + R() * 2, hz = fixed ? fixed[1] : kind === 'sheep' ? 13 + R() * 6 : 4.5 + R() * 1.5;
+      if (fixed) return place(kind, cx, cz, hx, hz);
       const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]].map(([a, b]) => [cx + a * (hx + 2), cz + b * (hz + 2)]);
       const hs = corners.map(([x, z]) => this.terrainHeight(x, z));
       if (Math.max(...hs) - Math.min(...hs) > (kind === 'sheep' ? 7 : 2.2)) return false; // gentle ground only
@@ -1489,6 +1590,9 @@ export class World {
         if (this.terrainHeight(x, z) > 160) return false;
       }
       if (this.paddocks.some((p) => Math.abs(p.cx - cx) < p.hx + hx + 25 && Math.abs(p.cz - cz) < p.hz + hz + 25)) return false;
+      return place(kind, cx, cz, hx, hz);
+    };
+    const place = (kind, cx, cz, hx, hz) => {
       const pad = { kind, cx, cz, hx, hz, segs: [] };
       // fence: 4 m pieces round the edge (posts and rails for sheep, a low picket run for the chickens)
       for (const [side, ax, az, bx, bz] of [['n', cx - hx, cz - hz, cx + hx, cz - hz], ['s', cx - hx, cz + hz, cx + hx, cz + hz], ['w', cx - hx, cz - hz, cx - hx, cz + hz], ['e', cx + hx, cz - hz, cx + hx, cz + hz]]) {
@@ -1505,6 +1609,8 @@ export class World {
       this.paddocks.push(pad);
       return true;
     };
+    // every farm has its own sheep paddock and chicken run
+    for (const f of this.farms || []) for (const p of f.pens) tryPlace(p.kind, p.cx, p.cz, [p.hx, p.hz]);
     // candidates: points beside country roads (so you actually drive past them), more around the farms and villages
     const cands = [];
     for (const e of this.edges) {
@@ -1960,12 +2066,12 @@ export class World {
   }
 
   // private homes in a handful of deliberate styles, each with its own proportions, roof and colours
-  addHouse(x, z, rot, y, suburban = false) {
+  addHouse(x, z, rot, y, suburban = false, forceStyle = null) {
     const R = this.rand;
     const pick = (arr) => arr[Math.floor(R() * arr.length)];
     const nearFarm = this.surf[Math.round((z + HALF) / CELL) * NV + Math.round((x + HALF) / CELL)] === SURF.FIELD || Math.hypot(x + 950, z - 1150) < 400; // fields, or Harlow farm country
     const r = R();
-    const style = nearFarm && r < 0.3 ? 'barn' : r < 0.24 ? 'cottage' : r < 0.42 ? 'farmhouse' : r < 0.6 ? 'bungalow' : r < 0.76 ? 'colonial' : r < 0.9 ? 'modern' : 'cottage';
+    const style = forceStyle || (nearFarm && r < 0.3 ? 'barn' : r < 0.24 ? 'cottage' : r < 0.42 ? 'farmhouse' : r < 0.6 ? 'bungalow' : r < 0.76 ? 'colonial' : r < 0.9 ? 'modern' : 'cottage');
     const S = {
       cottage: { w: [8, 10], d: [7, 8.5], h: 3.3, roof: [3.2, 3.8], walls: [0xf0e6d6, 0xe8dcc4, 0xdfe6dc, 0xf2e2d0, 0xe6d5c3], roofs: [0x4a4a52, 0x6b3a2e, 0x3d4a5a], trim: 0xf6f3ec, accent: [0x3f6b4a, 0x2f5a8a, 0x8a3a2a] },
       farmhouse: { w: [11, 14], d: [8, 9.5], h: 6.3, roof: [2.6, 3.2], walls: [0xf4f1ea, 0xf0e6c8, 0xdfe3d4], roofs: [0x4a4f55, 0x5c3b30, 0x3a3f44], trim: 0xffffff, accent: [0x2f3a44, 0x8a3a2a, 0x3f6b4a] },
@@ -2225,7 +2331,7 @@ export class World {
       shelf: { r: 1.0, slow: 0.95 }, fridge: { r: 0.7, slow: 0.93 }, counter: { r: 1.0, slow: 0.92 },
       tire: { r: 0.45, slow: 0.98 }, bench: { r: 0.8, slow: 0.97 }, bike: { r: 0.6, slow: 0.99 },
       busstop: { r: 1.4, slow: 0.9 }, phone: { r: 0.6, slow: 0.93 }, meter: { r: 0.15, slow: 0.995 }, mailbox: { r: 0.35, slow: 0.97 },
-      sign: { r: 0.15, slow: 0.995 }, chevron: { r: 0.35, slow: 0.99 }, tent: { r: 1.6, slow: 0.9 }, tentgreen: { r: 1.6, slow: 0.9 },
+      haybale: { r: 0.9, slow: 0.86 }, sign: { r: 0.15, slow: 0.995 }, chevron: { r: 0.35, slow: 0.99 }, tent: { r: 1.6, slow: 0.9 }, tentgreen: { r: 1.6, slow: 0.9 },
     }[kind];
     if (this._cityProps && this.inCityRect(x, z, 6)) y = CITY.at(x, z) + CITY.curb;
     const p = { kind, x, z, y, rot, broken: false, brokenT: 0 };
@@ -2381,6 +2487,12 @@ export class World {
         for (let t = 2.5; t < W - 2; t += 2.4) if (R() < 0.7) put('shelf', t, 0.7, 0); // parts and accessories
       }
       }
+    }
+    // hay bales round the farmyards (and a few stacked inside each barn)
+    for (const f of this.farms || []) {
+      for (const b of f.bales) this.addPropRaw('haybale', b.x, b.z, this.terrainHeight(b.x, b.z), b.rot);
+      const B = f.barn, c = Math.cos(B.rot), sn = Math.sin(B.rot);
+      for (const [lx, lz] of [[-6, -4], [-4, -4], [4, 4.5], [6, 4.5]]) this.addPropRaw('haybale', B.x + lx * c + lz * sn, B.z - lx * sn + lz * c, B.y, B.rot + Math.PI / 2);
     }
     // house garages: a breakable up-and-over door, and the usual clutter inside
     for (const h of this.houses) {
