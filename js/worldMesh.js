@@ -819,10 +819,18 @@ export function buildWorldMeshes(world, scene) {
     gb.transformFrom(start, h.rot, h.x, h.y, h.z);
     if (h.garage) {
       const g = h.garage, s0 = gb.count;
-      gb.box(0, 0, g.w / 2, g.d / 2, -1.0, 2.8, 1, 1, false, wall);
-      gb.quad([-g.w / 2 - 0.3, 2.75, g.d / 2 + 0.3], [g.w / 2 + 0.3, 2.75, g.d / 2 + 0.3], [g.w / 2 + 0.3, 3.3, -g.d / 2 - 0.3], [-g.w / 2 - 0.3, 3.3, -g.d / 2 - 0.3], null, roof);
-      gb.quad([-g.w / 2 + 0.5, 0.1, g.d / 2 + 0.03], [g.w / 2 - 0.5, 0.1, g.d / 2 + 0.03], [g.w / 2 - 0.5, 2.35, g.d / 2 + 0.03], [-g.w / 2 + 0.5, 2.35, g.d / 2 + 0.03], null, garageDoor);
-      for (let k = 1; k < 5; k++) gb.quad([-g.w / 2 + 0.5, 0.1 + k * 0.45, g.d / 2 + 0.04], [g.w / 2 - 0.5, 0.1 + k * 0.45, g.d / 2 + 0.04], [g.w / 2 - 0.5, 0.13 + k * 0.45, g.d / 2 + 0.04], [-g.w / 2 + 0.5, 0.13 + k * 0.45, g.d / 2 + 0.04], null, doorLine);
+      const gw2 = g.w / 2, gd2 = g.d / 2, T = 0.24, GH = 2.95;
+      // walls with thickness (open at the front), concrete floor, lintel over the door, roof
+      gb.box(-gw2 + T / 2, 0, T / 2, gd2, -1.0, GH, 1, 1, false, wall);
+      gb.box(gw2 - T / 2, 0, T / 2, gd2, -1.0, GH, 1, 1, false, wall);
+      gb.box(0, -gd2 + T / 2, gw2, T / 2, -1.0, GH, 1, 1, false, wall);
+      for (const sd of [-1, 1]) gb.box(sd * (gw2 - 0.3), gd2 - 0.15, 0.3, 0.15, -1.0, GH, 1, 1, false, wall); // door jambs
+      gb.box(0, gd2 - 0.15, gw2, 0.15, 2.6, GH, 1, 1, false, wall); // lintel
+      gb.top(-gw2, -gd2, gw2, gd2, 0.06, 1 / 3, lin(0x8f8a82)); // floor
+      gb.quad([-gw2 + 0.1, 2.9, gd2 - 0.1], [gw2 - 0.1, 2.9, gd2 - 0.1], [gw2 - 0.1, 2.9, -gd2 + 0.1], [-gw2 + 0.1, 2.9, -gd2 + 0.1], null, lin(0xd8d2c4)); // ceiling
+      gb.quad([-gw2 - 0.3, GH - 0.05, gd2 + 0.3], [gw2 + 0.3, GH - 0.05, gd2 + 0.3], [gw2 + 0.3, GH + 0.55, -gd2 - 0.3], [-gw2 - 0.3, GH + 0.55, -gd2 - 0.3], null, roof);
+      gb.box(0, gd2 + 0.15, gw2 + 0.3, 0.12, GH - 0.25, GH, 1, 1, false, trim); // fascia
+      gb.box(0, 2.85, 0.25, 0.12, 2.7, 2.88, 1, 1, true, lin(0xfff6dc)); // strip light
       // garage sits at its own ground height: offset from the house's base height
       gb.transformFrom(s0, h.rot, 0, 0, 0);
       const dy = g.y - h.y;

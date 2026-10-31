@@ -2061,17 +2061,26 @@ export class World {
     const R = this.rand;
     if (R() > 0.55) return;
     const side = R() < 0.5 ? -1 : 1;
-    const gw = 5.6, gd = 6.6, lx = side * (h.w / 2 + 1.2 + gw / 2), lz = -1;
+    const gw = 6.4, gd = 7.6, lx = side * (h.w / 2 + 1.0 + gw / 2), lz = -0.6; // a real single garage: room for a car and the clutter
     const [gx, gz] = this.houseToWorld(h, lx, lz);
     if (this.houseOverlaps(gx, gz, 7.5) && this.houses.filter((o) => o !== h && Math.abs(o.x - gx) < 9 && Math.abs(o.z - gz) < 9).length) return;
     if (this.roadDistance(gx, gz) < 4) return;
     const gy = h.y;
-    h.garage = { lx, lz, w: gw, d: gd, y: gy, x: gx, z: gz };
-    this.colliders.push({ type: 'box', x: gx, z: gz, hx: gw / 2, hz: gd / 2, c: Math.cos(h.rot), s: -Math.sin(h.rot), top: gy + 3.2, tall: true });
+    h.garage = { lx, lz, w: gw, d: gd, y: gy, x: gx, z: gz, carInside: R() < 0.4 };
+    // hollow: side walls, back wall, door jambs and a roof you can drive in under; the door itself is a breakable prop
+    const c = Math.cos(h.rot), sn = -Math.sin(h.rot);
+    const wallAt = (wx, wz, hx, hz, extra = {}) => { const [x, z] = this.houseToWorld(h, lx + wx, lz + wz); this.colliders.push({ type: 'box', x, z, hx, hz, c, s: sn, top: gy + 3.1, tall: true, ...extra }); };
+    wallAt(-gw / 2 + 0.12, 0, 0.14, gd / 2); wallAt(gw / 2 - 0.12, 0, 0.14, gd / 2); wallAt(0, -gd / 2 + 0.12, gw / 2, 0.14);
+    wallAt(-gw / 2 + 0.25, gd / 2 - 0.15, 0.27, 0.15); wallAt(gw / 2 - 0.25, gd / 2 - 0.15, 0.27, 0.15);
+    wallAt(0, 0, gw / 2, gd / 2, { top: gy + 3.3, bottom: gy + 2.75 }); // roof
     // driveway from the garage door to the road edge
     const len = Math.max(3, h.roadGap - (lz + gd / 2) + 0.5);
     h.drive = { lx, z0: lz + gd / 2, z1: lz + gd / 2 + len };
-    if (R() < 0.75) {
+    if (h.garage.carInside) {
+      const [cx, cz] = this.houseToWorld(h, lx - 0.4, lz + 0.2);
+      this.parkedCars.push({ x: cx, z: cz, y: gy, heading: h.rot, type: ['sedan', 'compact', 'pickup', 'sedan'][Math.floor(R() * 4)], inGarage: true });
+    }
+    if (R() < (h.garage.carInside ? 0.35 : 0.75)) {
       const [cx, cz] = this.houseToWorld(h, lx, lz + gd / 2 + 3.2);
       const type = ['sedan', 'pickup', 'pickup', 'compact', 'van', 'sedan'][Math.floor(R() * 6)];
       h.parked = { x: cx, z: cz, y: 0, heading: h.rot, type };
@@ -2372,6 +2381,21 @@ export class World {
         for (let t = 2.5; t < W - 2; t += 2.4) if (R() < 0.7) put('shelf', t, 0.7, 0); // parts and accessories
       }
       }
+    }
+    // house garages: a breakable up-and-over door, and the usual clutter inside
+    for (const h of this.houses) {
+      const g = h.garage;
+      if (!g) continue;
+      const W = (lx, lz) => this.houseToWorld(h, g.lx + lx, g.lz + lz);
+      const [dx, dz] = W(0, g.d / 2 - 0.1);
+      this.addPropBox('garagedoor', dx, dz, g.y + 0.05, h.rot, g.w / 2 - 0.5, 0.12);
+      const junk = (kind, lx, lz, rot) => { const [x, z] = W(lx, lz); this.addPropRaw(kind, x, z, g.y + 0.05, h.rot + rot); };
+      const s = g.carInside ? 1 : -1; // clutter along the side the car isn't on
+      junk('tire', s * (g.w / 2 - 0.6), -g.d / 2 + 0.7, 0); junk('tire', s * (g.w / 2 - 0.6), -g.d / 2 + 1.6, 0);
+      junk('shelf', 0.5, -g.d / 2 + 0.55, 0);
+      junk('boxes', s * (g.w / 2 - 0.7), -0.6, R() * 6);
+      if (R() < 0.7) junk('bike', s * (g.w / 2 - 0.5), 1.2, Math.PI / 2);
+      if (!g.carInside) { junk('chair', -1.2, 0.5, R() * 6); junk('bench', 0.4, -1.6, 0); if (R() < 0.5) junk('bin', 1.6, 1.6, 0); }
     }
     // village backyards: picket fence and junk (tyres, chairs, benches, bicycles)
     for (const h of this.houses) {

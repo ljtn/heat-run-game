@@ -78,6 +78,11 @@ function geometries() {
   for (let k = 0; k < 13; k++) pick.push(box(0.1, 1.05, 0.03, 0xf0ece0, -1.9 + k * 0.316, 0.52, 0.04));
   for (const x of [-1.98, 1.98]) pick.push(box(0.1, 1.15, 0.1, 0xd8d2c4, x, 0.57, 0));
   G.fence = mergeGeometries(pick);
+  // up-and-over garage door, 5.4 m wide: panels with grooves and a handle
+  const gd = [box(5.4, 2.5, 0.08, 0xe8e4da, 0, 1.25, 0)];
+  for (let k = 1; k < 5; k++) gd.push(box(5.42, 0.04, 0.1, 0xbdb7aa, 0, k * 0.5, 0));
+  gd.push(box(0.4, 0.06, 0.12, 0x555555, 0, 0.9, 0.05));
+  G.garagedoor = mergeGeometries(gd);
   // farm fence: posts and three rails
   const rails = [];
   for (const x of [-1.95, 0, 1.95]) rails.push(box(0.13, 1.2, 0.13, 0x6b4a2e, x, 0.6, 0));
@@ -181,6 +186,7 @@ const DEBRIS = {
   dumpster: { n: 9, cols: [0x2f4a36, 0x223428, 0xd0c8b0, 0x8a8070, 0xe8e4d8], size: [0.15, 0.7] },
   fence: { n: 7, cols: [0xf0ece0, 0xe8e2d4, 0xd8d2c4], size: [0.1, 1.0] },
   tire: { n: 3, cols: [0x1a1a1a], size: [0.3, 0.6] },
+  garagedoor: { n: 12, cols: [0xe8e4da, 0xbdb7aa], size: [0.2, 1.1] },
   railfence: { n: 6, cols: [0x7d5a38, 0x6b4a2e], size: [0.1, 1.2] },
   planterbox: { n: 9, cols: [0x9a7146, 0x4f7a30, 0x3f6b2a, 0xd8324a, 0xf2c14a], size: [0.1, 0.6] },
   tent: { n: 10, cols: [0xf4f2ec, 0xe8e6e0, 0xfff2b0], size: [0.15, 1.2] },
