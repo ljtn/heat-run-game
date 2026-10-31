@@ -238,6 +238,9 @@ export function facadeTextures(variant) {
   const S = 512;
   const [c, ctx] = canvas(S, S);
   const [ce, cte] = canvas(S, S);
+  // surface map for the shader: G = roughness, B = metalness. Rough masonry, glossy half-mirror glass.
+  const [cs, cts] = canvas(S, S);
+  cts.fillStyle = 'rgb(0,235,0)'; cts.fillRect(0, 0, S, S);
   const r = mulberry32(variant * 31 + 17);
   const rgb = (a, m = 1) => `rgb(${Math.min(255, a[0] * m) | 0},${Math.min(255, a[1] * m) | 0},${Math.min(255, a[2] * m) | 0})`;
   ctx.fillStyle = rgb(F.wall);
@@ -265,6 +268,9 @@ export function facadeTextures(variant) {
       ctx.fillStyle = g;
       if (F.style === 'arched') { ctx.beginPath(); ctx.arc(wx + ww / 2, wy + ww / 2, ww / 2, Math.PI, 0); ctx.lineTo(wx + ww, wy + wh); ctx.lineTo(wx, wy + wh); ctx.fill(); }
       else ctx.fillRect(wx, wy, ww, wh);
+      cts.fillStyle = F.style === 'curtain' ? 'rgb(0,18,170)' : 'rgb(0,26,120)';
+      if (F.style === 'arched') { cts.beginPath(); cts.arc(wx + ww / 2, wy + ww / 2, ww / 2, Math.PI, 0); cts.lineTo(wx + ww, wy + wh); cts.lineTo(wx, wy + wh); cts.fill(); }
+      else cts.fillRect(wx, wy, ww, wh);
       if (F.style === 'industrial') {
         // steel glazing bars
         ctx.fillStyle = rgb(F.frame);
@@ -322,7 +328,7 @@ export function facadeTextures(variant) {
     ctx.fillStyle = g;
     ctx.fillRect(x, 0, 2 + r() * 6, S * r());
   }
-  return { map: tex(c), emissive: tex(ce) };
+  return { map: tex(c), emissive: tex(ce), surf: tex(cs, { srgb: false }) };
 }
 
 // dressed stone blocks with mortar joints, for tunnel portals
@@ -583,5 +589,27 @@ export function streetSignAtlas() {
     ctx.fillText(t, guide ? x0 + 30 : x0 + 256, y0 + 66);
     if (arrow) { ctx.font = 'bold 80px Arial, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(arrow, x0 + 490, y0 + 66); }
   });
+  return tex(c, { repeat: false });
+}
+
+// highway exit signs, 4 x 6 cells of 512 x 256: for each of 12 destinations an advance sign (EXIT 400 m) and a final one (EXIT ↗)
+export const EXIT_DESTS = ['MERIDIAN CITY', 'ASHFORD', 'LAKEVIEW', 'HARLOW', 'MILLBROOK', 'MOUNT MERIDIAN', 'NORTH HORN', 'GREY KNUCKLE', 'IRON CROWN', 'LAKE CORVIN', 'DOWNTOWN', 'RIVERSIDE'];
+export function exitSignAtlas() {
+  const [c, ctx] = canvas(2048, 1536);
+  EXIT_DESTS.forEach((name, d) => [false, true].forEach((final, f) => {
+    const k = d * 2 + f, x0 = (k % 4) * 512, y0 = Math.floor(k / 4) * 256;
+    ctx.fillStyle = '#0e6a3a'; ctx.fillRect(x0, y0, 512, 256);
+    ctx.strokeStyle = '#f4f4f0'; ctx.lineWidth = 7; ctx.beginPath(); ctx.roundRect(x0 + 10, y0 + 10, 492, 236, 18); ctx.stroke();
+    // the yellow EXIT tab
+    ctx.fillStyle = '#f2c419'; ctx.fillRect(x0 + 340, y0 + 24, 150, 50);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 40px "Arial Narrow", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('EXIT', x0 + 415, y0 + 51);
+    ctx.fillStyle = '#f4f4f0'; ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.min(64, 760 / name.length)}px "Arial Narrow", Arial, sans-serif`;
+    ctx.fillText(name, x0 + 34, y0 + 130);
+    ctx.font = 'bold 46px "Arial Narrow", Arial, sans-serif';
+    if (final) { ctx.font = 'bold 96px Arial, sans-serif'; ctx.textAlign = 'right'; ctx.fillText('↗', x0 + 480, y0 + 196); }
+    else ctx.fillText('400 m', x0 + 34, y0 + 200);
+  }));
   return tex(c, { repeat: false });
 }

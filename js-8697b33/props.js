@@ -565,11 +565,11 @@ export function buildAlleyDressing(world, scene, mats) {
     }
   }
   if (grime.length) {
-    const gm = new THREE.Mesh(mergeGeometries(grime), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
+    const gm = new THREE.Mesh(mergeGeometries(grime), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6 }));
     gm.receiveShadow = true; scene.add(gm);
   }
   if (puddles.length) {
-    const pm = new THREE.Mesh(mergeGeometries(puddles), new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    const pm = new THREE.Mesh(mergeGeometries(puddles), new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -8 }));
     pm.receiveShadow = true; scene.add(pm);
   }
   const add = (list, mat, shadow) => {
@@ -613,7 +613,7 @@ export function buildBunting(world, scene, mats) {
       const z = c1.z0 + 10 + R() * (c1.z1 - c1.z0 - 20);
       ax = c1.x1 + CITY.walk; az = z; bx = c2.x0 - CITY.walk; bz = z;
     }
-    if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null) continue;
+    if (world.excluded((ax + bx) / 2, (az + bz) / 2, 2) || world.bridgeAt((ax + bx) / 2, (az + bz) / 2, 1e9) !== null || world.nearTram((ax + bx) / 2, (az + bz) / 2, 6)) continue;
     const y = CITY.at(ax, az) + 9 + R() * 3;
     // both ends tie to a facade that's actually there and tall enough; otherwise try another street
     const face = (px, pz, dir) => world.buildings.find((b) => (h
@@ -787,6 +787,28 @@ export function buildAdSigns(world, scene, mats) {
     slab(cx + nx * 0.2, y, cz + nz * 0.2, W + 0.4, H + 0.4, 0.3, rot, 0x26272a);
     face(cx + nx * 0.37, y, cz + nz * 0.37, W, H, rot, Math.floor(R() * 12));
     for (const v of [-W * 0.3, 0, W * 0.3]) slab(cx + ca * v + nx * 0.9, y + H / 2 + 0.35, cz - sa * v + nz * 0.9, 0.4, 0.1, 0.9, rot, 0x2a2b2d); // flood lamps
+  }
+  // highway exit gantries: posts each side, a truss across, the green sign hung over the lanes heading for the exit
+  const ex = { p: [], u: [], i: [] };
+  for (const g of world.exitSigns || []) {
+    const rot = Math.atan2(-g.tx, -g.tz), rx = -g.tz, rz = g.tx, o = g.hw + (g.deck ? 0.6 : 1.8);
+    for (const sd of [-1, 1]) slab(g.x + rx * o * sd, g.y + 4.6, g.z + rz * o * sd, 0.35, 9.6, 0.35, rot, 0x8a8e94);
+    for (const dy of [8.1, 9.1]) slab(g.x, g.y + dy, g.z, 2 * o + 0.4, 0.18, 0.18, rot, 0x8a8e94);
+    const W = 6.4, H = 3.2, cx = g.x + rx * g.hw * 0.5, cz = g.z + rz * g.hw * 0.5, cy = g.y + 8.6 - H / 2 + 0.3;
+    slab(cx - g.tx * 0.12, cy, cz - g.tz * 0.12, W + 0.2, H + 0.2, 0.12, rot, 0x4a4e54); // back plate
+    const k = g.dest * 2 + (g.final ? 1 : 0), u0 = (k % 4) / 4, u1 = u0 + 0.25, v1 = 1 - Math.floor(k / 4) / 6, v0 = v1 - 1 / 6;
+    const ca = Math.cos(rot), sa = Math.sin(rot), fx = cx - g.tx * 0.2, fz = cz - g.tz * 0.2, base = ex.p.length / 3;
+    ex.p.push(fx - ca * W / 2, cy - H / 2, fz + sa * W / 2, fx + ca * W / 2, cy - H / 2, fz - sa * W / 2, fx + ca * W / 2, cy + H / 2, fz - sa * W / 2, fx - ca * W / 2, cy + H / 2, fz + sa * W / 2);
+    ex.u.push(u0, v0, u1, v0, u1, v1, u0, v1);
+    ex.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  if (ex.p.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(ex.p, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(ex.u, 2));
+    g.setIndex(ex.i); g.computeVertexNormals();
+    const t = TX.exitSignAtlas();
+    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: t, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.12, roughness: 0.45 })));
   }
   if (metal.length) { const m = new THREE.Mesh(mergeGeometries(metal), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.4 })); m.castShadow = m.receiveShadow = true; scene.add(m); }
   if (ad.p.length) {

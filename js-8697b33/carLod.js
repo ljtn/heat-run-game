@@ -17,7 +17,8 @@ export function carLodGeometry(v) {
   root.traverse((o) => {
     if (!o.isMesh || !o.visible || o === v.lod) return;
     const mat = Array.isArray(o.material) ? o.material[0] : o.material;
-    if (!mat || mat.transparent && mat.opacity < 0.3) return;
+    // (nothing see-through: the night-time headlight ground glows are huge quads and baked in they read as white sheets)
+    if (!mat || mat.transparent || mat.blending === THREE.AdditiveBlending) return;
     let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     const keep = new THREE.BufferGeometry();
     keep.setAttribute('position', g.attributes.position);
@@ -26,7 +27,7 @@ export function carLodGeometry(v) {
     keep.applyMatrix4(_m);
     // bake the material colour (and any glow) into vertex colours
     _c.copy(mat.color || _c.set(1, 1, 1));
-    if (mat.emissive && mat.emissiveIntensity > 0.5) _c.add(mat.emissive.clone().multiplyScalar(0.4));
+    if (mat.emissive && mat.emissiveIntensity > 0.5) _c.lerp(mat.emissive, 0.25); // lamps: a little warmer, never a glaring white
     const n = keep.attributes.position.count, col = new Float32Array(n * 3), src = g.attributes.color;
     for (let i = 0; i < n; i++) {
       const r = src ? src.getX(i) : 1, gg = src ? src.getY(i) : 1, b = src ? src.getZ(i) : 1;

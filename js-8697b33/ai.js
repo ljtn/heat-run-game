@@ -3,11 +3,15 @@ import * as THREE from 'three';
 import { Vehicle } from './vehicle.js';
 import { CITY } from './world.js';
 
-const _fw = new THREE.Vector3(), _rt = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const _fw = new THREE.Vector3(), _rt = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _v1 = new THREE.Vector3();
 
 const CIV_TYPES = [
-  ['sedan', 34], ['compact', 24], ['taxi', 9], ['van', 11], ['pickup', 17], ['bus', 5], ['truck', 8],
+  ['sedan', 26], ['compact', 17], ['taxi', 9], ['van', 10], ['pickup', 14], ['bus', 5], ['truck', 8],
+  ['hatch', 14], ['sedan2', 15], ['suv', 13], ['sport', 2.6], ['super', 0.9], // modern cars; the sporty ones are a rare sight
 ];
+const MODERN = new Set(['hatch', 'sedan2', 'suv', 'sport', 'super']);
+const MODERN_COLORS = [0xc8ccd0, 0xe8e8e6, 0x2a2c30, 0x5a5e64, 0x1e3a6a, 0x8a1a1a, 0xf2f0ea, 0x3a4a5a, 0x6a7078, 0x0f0f10];
+const SPORT_COLORS = [0xd81e1e, 0xf2c419, 0x1a1a1a, 0xf2f2f0, 0x2a6ad8, 0xf07a1a, 0x3aa84a];
 const CIV_COLORS = [0xb8872a, 0x5d6b2c, 0xb5541f, 0x6b4a2e, 0xd9cfb4, 0x8fb2c9, 0x7a1f1f, 0x2e3a52, 0x3f5a3a, 0x9a9a8e, 0x1a1a1a, 0xc9b98a, 0x4f6f7a, 0x8a3a2a, 0xe0d8c0];
 
 // city streets get lots of buses, delivery trucks and vans; taxis and buses stay in town
@@ -164,7 +168,8 @@ export class TrafficManager {
       v.root.visible = true;
       return v;
     }
-    const color = scheme === 'police' ? 0xffffff : type === 'taxi' ? 0xf2c230 : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
+    const pal = type === 'sport' || type === 'super' ? SPORT_COLORS : MODERN.has(type) ? MODERN_COLORS : CIV_COLORS;
+    const color = scheme === 'police' ? 0xffffff : scheme === 'fire' ? 0xb81c14 : scheme === 'ambulance' ? 0xf2f0ea : type === 'taxi' ? 0xf2c230 : pal[Math.floor(Math.random() * pal.length)];
     const v = new Vehicle(this.world, type, color, type === 'bus' ? 'bus' : scheme);
     this.scene.add(v.root);
     return v;
@@ -213,6 +218,50 @@ export class TrafficManager {
     this.drivers.push(d);
     this.game.onSpawn(v);
     return d;
+  }
+
+  // an ambulance or fire engine, out of sight, under lights and siren; with a destination it drives there and parks
+  spawnEmergency(type, player, cam, dest = null) {
+    // responders set off from a few blocks away from the call (out of the player's sight); runs start near the player
+    let sp = null;
+    for (let k = 0; k < 6 && !sp; k++) {
+      sp = dest ? this.findSpawn({ pos: { x: dest.x, y: 0, z: dest.z } }, 160, 300, cam, true) : this.findSpawn(player, 230, 420, cam, true);
+      if (sp && Math.hypot(sp.x - player.pos.x, sp.z - player.pos.z) < 140) sp = null;
+    }
+    if (!sp) return null;
+    const v = this.getVehicle(type, type === 'firetruck' ? 'fire' : 'ambulance');
+    const d = new AIDriver(v, type === 'firetruck' ? 'fire' : 'ems');
+    d.aggression = 1.3;
+    d.sirenOn = true;
+    this.placeOnLane(d, sp.ln, sp.idx, 8);
+    this.drivers.push(d);
+    this.game.onSpawn(v);
+    if (dest) this.routeTo(d, dest.x, dest.z);
+    return d;
+  }
+
+  routeTo(d, x, z) {
+    const w = this.world, v = d.v;
+    let start = -1;
+    for (const p of d.queue) if (p.stop >= 0) { start = p.stop; break; }
+    if (start < 0) start = this.nearestNode(v.pos.x, v.pos.z);
+    const keep = [];
+    for (const p of d.queue) { keep.push(p); if (p.stop === start) break; }
+    d.queue = keep;
+    d.lastNode = start;
+    for (const step of this.dijkstra(start, this.nearestNode(x, z))) this.appendLane(d, this.lane(w.edges[step.edge], step.dir));
+    d.queue.push({ x, z, y: w.groundAt(x, z, 99).h, v: 0, stop: -1, axis: -1, tx: 0, tz: 1 });
+    d.mode = 'respond';
+    d.dest = { x, z };
+  }
+
+  // back into ordinary traffic: lights off, wander on
+  standDown(d) {
+    d.sirenOn = false;
+    d.mode = 'cruise';
+    d.queue.length = 0;
+    d.lastNode = -1;
+    if (d.v.car.lightbar) { d.v.car.lightbar.red.emissiveIntensity = 0; d.v.car.lightbar.blue.emissiveIntensity = 0; }
   }
 
   spawnPolice(player, cam, minD = 170, maxD = 340, mode = 'pursuit') {
@@ -438,7 +487,8 @@ export class TrafficManager {
     for (let i = this.drivers.length - 1; i >= 0; i--) {
       const d = this.drivers[i];
       const dist = d.v.pos.distanceTo(player.pos);
-      const tooFar = dist > (d.role === 'police' && this.heat > 0 ? 520 : d.role === 'civ' && this.civTarget > 30 ? 360 : 440);
+      const onCall = d.mode === 'respond' || d.mode === 'onscene';
+      const tooFar = dist > (onCall ? 950 : d.role === 'police' && this.heat > 0 ? 520 : d.role === 'civ' && this.civTarget > 30 ? 360 : 440);
       const dead = (d.v.wrecked || d.v.isFlipped() || d.v.inWater > 0.5) && dist > 120;
       const hopeless = ((d.stuckCount || 0) > 3 && dist > 140) || ((d.waitT || 0) > 30 && dist > 110);
       if (tooFar || dead || hopeless || d.v.pos.y < -20) this.release(d);
@@ -452,8 +502,9 @@ export class TrafficManager {
       const dc = Math.hypot(d.v.pos.x - cp.x, d.v.pos.z - cp.z), dp = Math.hypot(d.v.pos.x - player.pos.x, d.v.pos.z - player.pos.z);
       const near = Math.min(dc, dp);
       if (!d.ghost && near > 115 && d.queue.length && !d.v.isFlipped()) { d.ghost = true; d.v.ghost = true; d.gSpeed = Math.max(0, d.v.speed); }
-      else if (d.ghost && near < 95) this.unghost(d);
+      else if (d.ghost && near < 95 && (near < 55 || !this.overlapsAny(d.v, allCars))) this.unghost(d, allCars); // (wait until clear of its neighbours)
     }
+    this.emergencies = this.drivers.filter((d) => d.sirenOn && !d.v.wrecked && d.mode !== 'onscene');
     for (const d of this.drivers) d.ghost ? this.ghostDrive(d, dt, allCars) : this.drive(d, dt, player, allCars);
     for (const d of this.drivers.filter((x) => x.kill)) { d.kill = false; this.release(d); }
   }
@@ -467,12 +518,35 @@ export class TrafficManager {
     d.cut = now;
   }
 
-  unghost(d) {
+  overlapsAny(v, allCars) {
+    for (const o of allCars) {
+      if (o === v || o.sleeping) continue;
+      const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z, r = v.hz + o.hz + 0.5;
+      if (dx * dx + dz * dz < r * r) {
+        v.forward(_fw);
+        const along = Math.abs(dx * _fw.x + dz * _fw.z), lat = Math.abs(dx * _fw.z - dz * _fw.x);
+        if (along < v.hz + o.hz + 0.6 && lat < v.hx + o.hx + 0.3) return true;
+      }
+    }
+    return false;
+  }
+
+  unghost(d, allCars) {
     const v = d.v;
     d.unghostT = performance.now();
     d.ghost = false; v.ghost = false;
+    // start no faster than the gap to whoever is just ahead allows (a gliding queue packs tighter than real brakes do)
+    let speed = d.gSpeed || 0;
+    v.forward(_fw);
+    for (const o of allCars || []) {
+      if (o === v || o.sleeping) continue;
+      const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z, fwd = dx * _fw.x + dz * _fw.z;
+      if (fwd < 0 || fwd > 25 || Math.abs(dx * _fw.z - dz * _fw.x) > 2.4) continue;
+      const gap = fwd - v.hz - o.hz;
+      speed = Math.min(speed, Math.max(0, o.vel.dot(_fw)) + Math.sqrt(2 * 4 * Math.max(0, gap - 1.5)));
+    }
     const g = this.world.groundAt(v.pos.x, v.pos.z, v.pos.y + 1.5).h;
-    v.resetTo(v.pos.x, g, v.pos.z, v.heading, d.gSpeed || 0);
+    v.resetTo(v.pos.x, g, v.pos.z, v.heading, speed);
   }
 
   ghostDrive(d, dt, allCars) {
@@ -494,6 +568,7 @@ export class TrafficManager {
           const s = w.lightState(nd, q[i].axis, this.time);
           if (s === 'R' || (s === 'Y' && acc > 12)) { vDes = Math.min(vDes, Math.sqrt(2 * 3.8 * Math.max(0, acc - 3))); break; }
         }
+        if (acc < 45 && this.boxBlocked(d, q, i, allCars)) { vDes = Math.min(vDes, Math.sqrt(2 * 3.8 * Math.max(0, acc - 3))); break; } // (same rule as real cars)
       }
     }
     for (const o of allCars) {
@@ -524,8 +599,8 @@ export class TrafficManager {
     // passing just overhead and carry the car up onto it
     const ly = q[0].y !== undefined ? q[0].y : w.groundAt(x, z, v.pos.y + 1.5).h;
     // a route that disagrees with where the car actually is (e.g. a street under the expressway): out of sight, so retire it
-    if (Math.abs(ly + 0.11 + v.comH - v.pos.y) > 2.5) { d.kill = true; return; }
-    v.pos.set(x, ly + 0.06 + v.comH + 0.05, z);
+    if (Math.abs(ly + v.comH - v.pos.y) > 2.5) { d.kill = true; return; }
+    v.pos.set(x, ly + v.comH, z); // (where a parked car's body settles on its springs)
     v.forward(_fw);
     v.vel.copy(_fw).multiplyScalar(d.gSpeed);
     v.angVel.set(0, 0, 0);
@@ -538,11 +613,12 @@ export class TrafficManager {
     const v = d.v, inp = v.input;
     if (v.wrecked || v.damage >= 1) {
       v.wrecked = true;
+      v.hazards = true;
       inp.throttle = 0; inp.brake = 0.3; inp.handbrake = 1; inp.steer = 0;
       d.sirenOn = false;
       return;
     }
-    if (d.role === 'police') {
+    if (v.car.lightbar) {
       d.lightPhase += dt;
       const lb = v.car.lightbar;
       if (lb) {
@@ -551,6 +627,11 @@ export class TrafficManager {
         lb.red.emissiveIntensity = on ? (Math.sin(ph) > 0 ? 7 : 0.2) : 0;
         lb.blue.emissiveIntensity = on ? (Math.sin(ph) <= 0 ? 7 : 0.2) : 0;
       }
+    }
+    if (d.mode === 'onscene') { // parked at a call-out, lights going
+      inp.throttle = 0; inp.brake = 1; inp.steer = 0; inp.handbrake = 1;
+      v.hazards = false;
+      return;
     }
     if (d.mode === 'block') {
       inp.throttle = 0; inp.brake = 1; inp.steer = 0; inp.handbrake = 1;
@@ -578,7 +659,7 @@ export class TrafficManager {
       if (!d.queue.length) this.joinNearestRoad(d);
       let rem = 0;
       for (let i = 1; i < d.queue.length && rem < 90; i++) rem += Math.abs(d.queue[i].x - d.queue[i - 1].x) + Math.abs(d.queue[i].z - d.queue[i - 1].z);
-      if (rem < 90 && d.lastNode >= 0) this.extendRandom(d);
+      if (rem < 90 && d.lastNode >= 0 && d.mode !== 'respond' && d.mode !== 'race') this.extendRandom(d);
     }
     const q = d.queue;
     // drop passed points
@@ -589,6 +670,17 @@ export class TrafficManager {
       const dd = Math.hypot(dx, dz);
       if (dd < 3.5 || (along < 0 && dd < 14)) q.shift();
       else break;
+    }
+
+    // turn signal: a bend of more than ~30 degrees in the next 40 m of the route
+    v.indicate = 0;
+    if (!chasing) {
+      let ac = 0, qx = pos.x, qz = pos.z;
+      for (let i = 0; i < q.length && ac < 40; i++) {
+        ac += Math.hypot(q[i].x - qx, q[i].z - qz); qx = q[i].x; qz = q[i].z;
+        const side = q[i].tx * _rt.x + q[i].tz * _rt.z, fwdc = q[i].tx * _fw.x + q[i].tz * _fw.z;
+        if (Math.abs(side) > 0.5 && fwdc < 0.87) { v.indicate = side > 0 ? 1 : -1; break; }
+      }
     }
 
     // target point (pure pursuit)
@@ -618,8 +710,12 @@ export class TrafficManager {
           const nd = this.world.nodes[q[i].stop];
           if (nd.light) {
             const s = this.world.lightState(nd, q[i].axis, this.time);
-            if (s === 'R' || (s === 'Y' && acc > 12)) pv = 0;
+            if (d.mode === 'race') pv = Math.min(pv, 14); // racing: lights mean nothing
+            else if (d.sirenOn && d.role !== 'police') pv = Math.min(pv, 6); // under lights and siren: through the red, carefully
+            else if (s === 'R' || (s === 'Y' && acc > 12)) pv = 0;
           }
+          // don't block the box: never drive into a junction without room to get out the other side
+          if (pv > 0 && acc < 45 && !d.sirenOn && d.mode !== 'race' && this.boxBlocked(d, q, i, allCars)) pv = 0;
         }
       }
       const allowed = Math.sqrt(pv * pv + 2 * decel * Math.max(0, acc - (pv === 0 ? 2 : 0)));
@@ -713,6 +809,20 @@ export class TrafficManager {
       d.jWait = jWaiting && speed < 1 ? (d.jWait || 0) + dt : 0;
     }
 
+    // pull over for an emergency vehicle coming up behind with its siren on
+    if (d.role === 'civ') for (const e of this.emergencies || []) {
+      const ev = e.v;
+      if (ev === v) continue;
+      const dx = ev.pos.x - pos.x, dz = ev.pos.z - pos.z, fwd = dx * _fw.x + dz * _fw.z, lat = dx * _rt.x + dz * _rt.z;
+      if (fwd < -50 || fwd > 2 || Math.abs(lat) > 5) continue;
+      ev.forward(_v1);
+      if (_v1.x * _fw.x + _v1.z * _fw.z < 0.6) continue;
+      vDes = Math.min(vDes, 3.5);
+      tx += _rt.x * 1.8; tz += _rt.z * 1.8;
+      v.indicate = 1;
+      break;
+    }
+
     // obstacle avoidance / following
     let nearestAhead = 1e9, aheadSpeed = 0, aheadLat = 0, aheadLen = 2.5;
     for (const o of allCars) {
@@ -732,6 +842,14 @@ export class TrafficManager {
         // swerve around traffic
         const side = aheadLat > 0 ? -1 : 1;
         tx += _rt.x * side * 3.5; tz += _rt.z * side * 3.5;
+      } else if (d.mode === 'race' && gap < 22) {
+        // racing: dart round whoever is in the way
+        const side = aheadLat > 0 ? -1 : 1;
+        tx += _rt.x * side * 3.4; tz += _rt.z * side * 3.4;
+      } else if (d.sirenOn && d.role !== 'police' && gap < 18 && aheadSpeed < 4) {
+        // under lights: pull out and pass the stopped traffic on the left, steadily
+        tx -= _rt.x * 3.6; tz -= _rt.z * 3.6;
+        vDes = Math.min(vDes, 8);
       } else {
         const follow = Math.max(0, aheadSpeed) + gap * 0.45;
         vDes = Math.min(vDes, Math.max(0, follow), Math.sqrt(2 * 5 * Math.max(0, gap - 1)));
@@ -784,6 +902,31 @@ export class TrafficManager {
     // long waits (gridlock) are tracked so the traffic manager can quietly clear them away from the player
     d.waitT = Math.abs(speed) < 0.5 && !police ? (d.waitT || 0) + dt : 0;
     if (d.horn > 0) d.horn -= dt;
+  }
+
+  // is the way through this junction (from the stop point q[i], across it and a car length beyond) held up by a
+  // slow or stopped car?
+  boxBlocked(d, q, i, allCars) {
+    const v = d.v, nd = this.world.nodes[q[i].stop];
+    const need = 2 * Math.max(nd.hx || 8, nd.hz || 8) + 2 * v.hz + 3;
+    // only the slow cars around this junction matter
+    const near = [], R2 = (need + 6) ** 2;
+    for (const o of allCars) {
+      if (o === v || o.sleeping || Math.abs(o.speed) >= 2.5) continue;
+      const dx = o.pos.x - q[i].x, dz = o.pos.z - q[i].z;
+      if (dx * dx + dz * dz < R2) near.push(o);
+    }
+    if (!near.length) return false;
+    let dist = 0;
+    for (let k = i + 1; k < q.length && dist < need; k++) {
+      dist += Math.hypot(q[k].x - q[k - 1].x, q[k].z - q[k - 1].z);
+      for (const o of near) {
+        if (o === v || o.sleeping) continue;
+        const dx = o.pos.x - q[k].x, dz = o.pos.z - q[k].z;
+        if (dx * dx + dz * dz < 3.2 * 3.2 + o.hz * o.hz * 0.25 && Math.abs(o.speed) < 2.5) return true;
+      }
+    }
+    return false;
   }
 
   joinNearestRoad(d) {

@@ -8,6 +8,23 @@ import { graffitiQuad, graffitiMesh } from './props.js';
 
 const lin = (hex) => new THREE.Color(hex);
 
+// aerial perspective: past a few dozen metres, surfaces fade toward the haze colour, and faster the higher they are
+// above you (looking up a tower you look through more bright air), so distant tower tops go soft and pale
+function aerial(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.vertexShader = 'varying vec3 vAerW;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vAerW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'varying vec3 vAerW;\n' + sh.fragmentShader.replace('#include <fog_fragment>', `#include <fog_fragment>
+      #ifdef USE_FOG
+        float aD = length(vAerW - cameraPosition), aH = max(0.0, vAerW.y - cameraPosition.y);
+        float aer = (1.0 - exp(-aD * fogDensity * 0.9 * (1.0 + aH / 40.0))) * smoothstep(50.0, 220.0, aD);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * 1.06 + 0.02, clamp(aer, 0.0, 0.6));
+      #endif`);
+  };
+  return mat;
+}
+
 class GeoBuilder {
   constructor(withColor = false) {
     this.p = []; this.n = []; this.u = []; this.c = withColor ? [] : null; this.i = [];
@@ -394,7 +411,7 @@ export function buildWorldMeshes(world, scene) {
     const g = roadBuilders[k].geometry();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
       map: roadTex[k], roughness: k === 'dirt' ? 0.95 : 0.82, metalness: 0,
-      transparent: k !== 'city', depthWrite: k === 'city', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      transparent: k !== 'city', depthWrite: k === 'city', polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4, // (no slope-scaled bias: at low angles it paints the road over the tyres)
     }));
     m.receiveShadow = true;
     m.renderOrder = 2;
@@ -408,7 +425,7 @@ export function buildWorldMeshes(world, scene) {
     const hx = nd.hx, hz = nd.hz, y = nd.y + 0.03;
     ib.quad([nd.x - hx, y, nd.z + hz], [nd.x + hx, y, nd.z + hz], [nd.x + hx, y, nd.z - hz], [nd.x - hx, y, nd.z - hz], [[0, 0], [1, 0], [1, 1], [0, 1]]);
   }
-  const interMesh = new THREE.Mesh(ib.geometry(), new THREE.MeshStandardMaterial({ map: TX.intersectionTexture(), roughness: 0.82, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const interMesh = new THREE.Mesh(ib.geometry(), new THREE.MeshStandardMaterial({ map: TX.intersectionTexture(), roughness: 0.82, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -8 }));
   interMesh.receiveShadow = true;
   group.add(interMesh);
 
@@ -470,7 +487,7 @@ export function buildWorldMeshes(world, scene) {
     }
     for (const [x, s] of [[blk.x0, -1], [blk.x1, 1]]) walkB.wall(x, s < 0 ? blk.z0 : blk.z1, s, 0, blk.z1 - blk.z0, Y(x) - 0.4 - CITY.curb, Y(x), 0, 1 / 4, 1 / 4);
   }
-  const bayMesh = new THREE.Mesh(bayB.geometry(), new THREE.MeshStandardMaterial({ map: TX.parkingBayTexture(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const bayMesh = new THREE.Mesh(bayB.geometry(), new THREE.MeshStandardMaterial({ map: TX.parkingBayTexture(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4 }));
   bayMesh.receiveShadow = true;
   group.add(bayMesh);
   const walkMesh = new THREE.Mesh(walkB.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9 }));
@@ -487,11 +504,12 @@ export function buildWorldMeshes(world, scene) {
   const facadeB = {};
   for (let v = 0; v < TX.FACADE_COUNT; v++) {
     const ft = TX.facadeTextures(v), gl = TX.FACADE_GLASS[v];
-    mats.facades.push(new THREE.MeshStandardMaterial({ map: ft.map, emissiveMap: ft.emissive, emissive: 0xffffff, emissiveIntensity: 0, roughness: gl ? 0.35 : 0.85, metalness: gl ? 0.3 : 0 }));
+    // glass panes glossy and part-mirror (they pick up the sky), walls rough; and the air between you and the upper floors
+    mats.facades.push(aerial(new THREE.MeshStandardMaterial({ map: ft.map, emissiveMap: ft.emissive, emissive: 0xffffff, emissiveIntensity: 0, roughness: 1, metalness: 1, roughnessMap: ft.surf, metalnessMap: ft.surf, envMapIntensity: gl ? 1.3 : 1.0 })));
   }
   const st = TX.shopTextures();
   mats.shop = new THREE.MeshStandardMaterial({ map: st.map, emissiveMap: st.emissive, emissive: 0xffffff, emissiveIntensity: 0.1, roughness: 0.7 });
-  const roofMat = new THREE.MeshStandardMaterial({ map: TX.roofTexture(), roughness: 0.95, side: THREE.DoubleSide });
+  const roofMat = aerial(new THREE.MeshStandardMaterial({ map: TX.roofTexture(), roughness: 0.95, side: THREE.DoubleSide }));
   const beaconMat = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff2010, emissiveIntensity: 4 });
   const crownMat = new THREE.MeshStandardMaterial({ color: 0xb8a070, roughness: 0.3, metalness: 0.8, side: THREE.DoubleSide });
   mats.shopLight = new THREE.MeshStandardMaterial({ color: 0xfff4dc, emissive: 0xfff0d0, emissiveIntensity: 1.6, side: THREE.DoubleSide });
@@ -940,10 +958,10 @@ export function buildWorldMeshes(world, scene) {
     wd.transformFrom(wds, h.rot, h.x, h.y, h.z);
   }
   const houseMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: THREE.DoubleSide });
-  const driveMesh = new THREE.Mesh(drive.geometry(), new THREE.MeshStandardMaterial({ color: 0xc9bfa8, map: TX.sidewalkTexture(), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  const driveMesh = new THREE.Mesh(drive.geometry(), new THREE.MeshStandardMaterial({ color: 0xc9bfa8, map: TX.sidewalkTexture(), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6 }));
   driveMesh.receiveShadow = true;
   group.add(driveMesh);
-  const edgeMesh = new THREE.Mesh(edge.geometry(), new THREE.MeshStandardMaterial({ color: 0x8f8a80, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+  const edgeMesh = new THREE.Mesh(edge.geometry(), new THREE.MeshStandardMaterial({ color: 0x8f8a80, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -10 }));
   edgeMesh.receiveShadow = true;
   group.add(edgeMesh);
   mats.winLit = new THREE.MeshStandardMaterial({ color: 0x2a3440, emissive: 0xffc37a, emissiveIntensity: 0, roughness: 0.2, metalness: 0.2 });
@@ -1057,7 +1075,7 @@ export function buildWorldMeshes(world, scene) {
   screenMesh.castShadow = true;
   group.add(screenMesh);
   const scrPos = screenMesh.geometry.attributes.position;
-  const deckMesh = new THREE.Mesh(deckTop.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1 }));
+  const deckMesh = new THREE.Mesh(deckTop.geometry(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4 }));
   deckMesh.receiveShadow = true;
   group.add(deckMesh);
   const railMesh = new THREE.Mesh(railB.geometry(), new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide }));
@@ -1666,7 +1684,7 @@ function buildLamps(world, group, mats) {
   const poles = new THREE.InstancedMesh(poleG, poleMat, n);
   const heads = new THREE.InstancedMesh(headG, mats.lampHead, n);
   const poolTex = TX.radialTexture('rgba(255,200,130,0.75)', 'rgba(255,170,90,0)', 128);
-  mats.lampPool = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4 });
+  mats.lampPool = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -12 });
   const poolG = new THREE.PlaneGeometry(20, 20).rotateX(-Math.PI / 2);
   const pools = new THREE.InstancedMesh(poolG, mats.lampPool, n);
   const m4 = new THREE.Matrix4();

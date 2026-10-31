@@ -46,6 +46,13 @@ export const SPECS = {
   },
 };
 SPECS.taxi = { ...SPECS.sedan, torque: 330 };
+SPECS.ambulance = { ...SPECS.van, style: 'ambulance', mass: 3400, frontZ: -2.2, rearZ: 1.75, wheelR: 0.38, wheelW: 0.26, torque: 650, kF: 52000, kR: 62000, cBump: 3800, cReb: 5200, arbF: 15000, arbR: 9000, L0: 0.5, brakeF: 5200, brakeR: 3800 };
+// modern cars: lighter, grippier, bigger wheels
+SPECS.hatch = { ...SPECS.compact, style: 'hatch', mass: 1150, frontZ: -1.3, rearZ: 1.22, wheelR: 0.31, wheelW: 0.21, torque: 210, mu: 1.08, cd: 0.75 };
+SPECS.sedan2 = { ...SPECS.sedan, style: 'sedan2', mass: 1420, frontZ: -1.45, rearZ: 1.35, wheelR: 0.33, wheelW: 0.23, torque: 320, mu: 1.1, cd: 0.8, drive: 'fwd' };
+SPECS.suv = { ...SPECS.pickup, style: 'suv', mass: 1750, frontZ: -1.45, rearZ: 1.35, wheelR: 0.36, wheelW: 0.25, torque: 380, mu: 1.05, cd: 1.0, L0: 0.5 };
+SPECS.sport = { ...SPECS.muscle, style: 'sport', mass: 1350, frontZ: -1.35, rearZ: 1.3, wheelR: 0.33, wheelW: 0.27, torque: 460, mu: 1.4, cd: 0.7, kF: 30000, kR: 30000, arbF: 9000, arbR: 5000 };
+SPECS.super = { ...SPECS.muscle, style: 'super', mass: 1400, frontZ: -1.45, rearZ: 1.25, comZ: 0.15, wheelR: 0.34, wheelW: 0.3, torque: 620, peakRpm: 5000, redline: 7800, idle: 950, mu: 1.55, cd: 0.6, kF: 34000, kR: 36000, arbF: 11000, arbR: 6000, gears: [3.0, 2.1, 1.6, 1.25, 1.0, 0.82] };
 // heavy diesels
 SPECS.bus = {
   ...base, style: 'bus', mass: 11000, frontZ: -3.55, rearZ: 2.55, comZ: -0.3, track: 2.06, wheelR: 0.5, wheelW: 0.32, L0: 0.55, travel: 0.3,
@@ -54,9 +61,10 @@ SPECS.bus = {
   brakeF: 16000, brakeR: 14000, handbrake: 20000, mu: 0.95, cd: 3.2, topFall: 1.2, maxSteer: 0.62,
 };
 SPECS.truck = {
-  ...SPECS.bus, style: 'truck', mass: 8500, frontZ: -2.55, rearZ: 2.15, comZ: -0.4, kF: 120000, kR: 130000, cBump: 10000, cReb: 14000,
+  ...SPECS.bus, style: 'truck', mass: 11500, frontZ: -3.55, rearZ: 3.0, comZ: -0.4, wheelR: 0.54, kF: 120000, kR: 130000, cBump: 10000, cReb: 14000,
   arbF: 45000, arbR: 45000, torque: 1150, brakeF: 13000, brakeR: 11000, cd: 2.8,
 };
+SPECS.firetruck = { ...SPECS.truck, style: 'firetruck', mass: 14000, frontZ: -3.25, rearZ: 2.6, torque: 1700, kF: 190000, kR: 210000, cBump: 16000, cReb: 22000, arbF: 70000, arbR: 70000, brakeF: 21000, brakeR: 18000 };
 
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _r = new THREE.Vector3(), _vp = new THREE.Vector3(), _f = new THREE.Vector3();
@@ -74,7 +82,10 @@ function tyreCurve(s, falloff) {
 
 export class Vehicle {
   constructor(world, type, color = 0xaa2222, scheme = 'plain') {
-    const spec = (this.spec = SPECS[type]);
+    // full-size wheels set out flush with the body (no toy-car tucked-in track); buses and trucks keep theirs
+    const base0 = SPECS[type], heavy = base0.style === 'bus' || base0.style === 'truck' || base0.style === 'firetruck';
+    const spec = (this.spec = heavy ? base0 : { ...base0, wheelR: base0.wheelR * 1.08, wheelW: base0.wheelW * 1.25 });
+    if (!heavy) spec.track = BODY_STYLES[spec.style].W - spec.wheelW - 0.05;
     this.type = type;
     this.world = world;
     this.car = buildCar(spec, color, scheme);
@@ -131,6 +142,9 @@ export class Vehicle {
     this.input = { throttle: 0, brake: 0, steer: 0, handbrake: 0 };
     this.steerAngle = 0;
     this.gear = 1;
+    this.autoReverse = false;
+    this.indicate = 0; // -1 left, 1 right
+    this.hazards = false;
     this.rpm = spec.idle;
     this.shiftT = 0;
     this.shiftHold = 0;
@@ -226,7 +240,8 @@ export class Vehicle {
       if (inp.throttle > 0.1 && this.speed > -1.0) { this.gear = 1; }
       else { thr = inp.brake; brk = inp.throttle; }
     } else {
-      if (this.speed < 0.8 && inp.brake > 0.1 && inp.throttle < 0.1) {
+      // (holding the brake at a standstill selects reverse: the player's controls only; AI cars pick their own gear)
+      if (this.autoReverse && this.speed < 0.8 && inp.brake > 0.1 && inp.throttle < 0.1) {
         this.revTimer += dt;
         if (this.revTimer > 0.22) { this.gear = -1; thr = inp.brake; brk = 0; }
       } else this.revTimer = 0;
@@ -575,6 +590,12 @@ export class Vehicle {
       vw.steer.position.set(w.mount.x, w.mount.y - w.l, w.mount.z);
       vw.steer.rotation.y = w.steer;
       vw.spin.rotation.x = w.spinAngle;
+    }
+    // turn signals: 1.5 blinks a second on the side the driver is turning (or both, as hazards)
+    if (this.car.indicators) {
+      const on = Math.floor(performance.now() / 333) % 2 === 0;
+      this.car.indicators[0].emissiveIntensity = on && (this.indicate < 0 || this.hazards) ? 3 : 0;
+      this.car.indicators[1].emissiveIntensity = on && (this.indicate > 0 || this.hazards) ? 3 : 0;
     }
     const braking = this.brakeEff > 0.1 || this.input.handbrake > 0;
     const night = this.headlightsOn ? 0.6 : 0;

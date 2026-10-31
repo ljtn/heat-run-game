@@ -22,6 +22,9 @@ import { HUD, fmtTime } from './hud.js';
 import { CameraRig, CAM_MODES } from './camera.js';
 import { Input } from './input.js';
 import { Atmosphere, PRESETS } from './sky.js';
+import { Tram } from './tram.js';
+import { FireSystem } from './fires.js';
+import { Races } from './race.js';
 import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
@@ -89,7 +92,7 @@ class Game {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = (this.scene = new THREE.Scene());
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 3200);
+    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3200); // (near 0.3: ~3x the depth precision, so ground layers don't need a big bias)
     this.buildMenu();
 
     const progress = (txt, f) => {
@@ -106,6 +109,7 @@ class Game {
     buildAlleyDressing(world, scene, this.meshes.mats);
     buildAdSigns(world, scene, this.meshes.mats);
     buildTerraces(world, scene);
+    this.tram = new Tram(world, scene);
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -123,9 +127,12 @@ class Game {
     this.input = new Input();
     this.camRig = new CameraRig(this.camera, world);
     this.traffic = new TrafficManager(world, scene, this);
+    this.fires = new FireSystem(world, scene, this);
+    this.races = new Races(this, scene);
 
     // player
     this.player = new Vehicle(world, 'muscle', this.paint, 'plain');
+    this.player.autoReverse = true;
     scene.add(this.player.root);
     this.cars.push(this.player);
     // two real headlight beams (left/right), wide and long; each goes dark if its lamps are smashed
@@ -310,6 +317,7 @@ class Game {
     if (m.billboard) m.billboard.emissiveIntensity = 0.12 + 0.9 * L;
     m.lampPool.opacity = 0.85 * L;
     m.lampPool.visible = L > 0.01;
+    this.nightMode = !!P.night;
     m.water.color.set(P.night ? 0x0c1a22 : 0x1e3f46); m.poolWater.color.copy(m.water.color);
     const lightsOn = L > 0.3;
     headlightMaterial().emissiveIntensity = lightsOn ? 5 : 0.3;
@@ -789,6 +797,9 @@ class Game {
     this.meshes.signals.update(this.traffic.time);
     this.meshes.mats.water.userData.time.value = this.time;
     this.meshes.trees.updateLod(this.camera.position);
+    this.tram.update(dt, this.nightMode);
+    this.fires.update(dt, this.player, this.time, this.state === 'drive');
+    this.races.update(dt, this.state === 'drive');
     if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));
@@ -914,7 +925,8 @@ class Game {
 
   updateCopLights(dt) {
     const P = this.player;
-    const cops = this.traffic.drivers.filter((d) => d.role === 'police' && d.sirenOn && !d.v.wrecked)
+    // cops, ambulances and fire engines under lights (parked at a call-out: lights, no siren)
+    const cops = this.traffic.drivers.filter((d) => d.sirenOn && !d.v.wrecked && d.v.car.lightbar)
       .map((d) => ({ d, dist: d.v.pos.distanceTo(P.pos) })).sort((a, b) => a.dist - b.dist);
     this.copLights.forEach((l, i) => {
       const c = cops[i];
@@ -923,10 +935,10 @@ class Game {
       v.upv(_v);
       l.position.copy(v.pos).addScaledVector(_v, 1.7);
       const red = Math.sin(c.d.lightPhase * 7) > 0;
-      l.color.set(red ? 0xff1a10 : 0x2040ff);
+      l.color.set(red ? 0xff1a10 : c.d.role === 'police' ? 0x2040ff : c.d.role === 'fire' ? 0xff5020 : 0xf0f0ff);
       l.intensity = (this.tod === 'day' ? 15 : 45);
     });
-    this.sirenList = cops;
+    this.sirenList = cops.filter((c) => c.d.mode !== 'onscene');
   }
 
   updateAudio(dt) {

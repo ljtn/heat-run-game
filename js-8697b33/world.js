@@ -1449,6 +1449,7 @@ export class World {
     this.buildPlazaTerraces();
     this.buildAlleyFeatures();
     this.buildCoveredStreets();
+    this.buildTramLine();
     this.planParkingBays();
     // park trees (after ramps so they stay clear of them)
     for (const blk of this.blocks) {
@@ -1597,6 +1598,46 @@ export class World {
     b.door = door;
   }
 
+  // green gantry signs before every exit off the highways and expressways: an advance sign ~400 m out, a final one ~120 m
+  buildExitSigns() {
+    this.exitSigns = [];
+    const place = (x, z) => { // which named place an exit leads towards
+      if (this.inCityRect(x, z, 150)) return Math.hypot(x - CITY.cx, z - CITY.cz) < 400 ? 10 : x > CITY.x1 - 300 ? 11 : 0;
+      let best = 0, bd = 1e18;
+      const cands = [...this.villages.map((v, i) => [v.x, v.z, 1 + i]), ...PEAKS.map((P, i) => [P.x, P.z, 5 + i]), [LAKE.x, LAKE.z, 9], [CITY.cx, CITY.cz, 0]];
+      for (const [px, pz, k] of cands) { const d = Math.hypot(px - x, pz - z); if (d < bd) { bd = d; best = k; } }
+      return best;
+    };
+    const big = (e) => !e.ramp && (e.type === 'highway' || e.fwy);
+    for (const nd of this.nodes) {
+      if (nd.edges.length < 3) continue;
+      const es = nd.edges.map((id) => this.edges[id]);
+      const mains = es.filter(big), exits = es.filter((e) => !big(e));
+      if (mains.length < 1 || !exits.length) continue;
+      // where does the exit go: follow it to its far end
+      const ex = exits[0], far = this.nodes[ex.a === nd.id ? ex.b : ex.a], dest = place(far.x, far.z);
+      for (const e of mains) {
+        const P = e.a === nd.id ? e.pts.slice().reverse() : e.pts; // travelling toward the junction
+        for (const [dist, final] of [[400, false], [120, true]]) {
+          let acc = 0, i = P.length - 1;
+          while (i > 0 && acc < dist) { acc += Math.hypot(P[i].x - P[i - 1].x, P[i].z - P[i - 1].z); i--; }
+          if (acc < dist || i < 3) continue;
+          const p = P[i], q = P[i + 1], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, tx = (q.x - p.x) / L, tz = (q.z - p.z) / L;
+          if (this.tunnelAt(p.x, p.z, p.y + 1) !== null || this.exitSigns.some((g) => Math.hypot(g.x - p.x, g.z - p.z) < 60)) continue;
+          if (this.nodes.some((o) => o !== nd && o.edges.length > 2 && Math.hypot(o.x - p.x, o.z - p.z) < 40)) continue;
+          const g = { x: p.x, z: p.z, y: p.y, tx, tz, hw: e.halfW, dest, final, deck: !!(e.fwy || e.bridge[i]) };
+          const po = e.halfW + (g.deck ? 0.6 : 1.8);
+          if ([-1, 1].some((sd) => this.onRampPath(p.x - tz * po * sd, p.z + tx * po * sd, 3) || this.roadDistance(p.x - tz * po * sd, p.z + tx * po * sd) < 0.5)) continue; // not where a ramp merges
+          this.exitSigns.push(g);
+          for (const sd of [-1, 1]) { // the posts stand just off each edge of the road (on the deck parapet when elevated)
+            const o = e.halfW + (g.deck ? 0.6 : 1.8);
+            this.colliders.push({ type: 'box', x: p.x - tz * o * sd, z: p.z + tx * o * sd, hx: 0.3, hz: 0.3, c: 1, s: 0, top: p.y + 9.5, bottom: p.y - 0.6, tall: true });
+          }
+        }
+      }
+    }
+  }
+
   // tall roadside billboards along the country highways and roads, angled to face oncoming traffic
   buildBillboards() {
     const R = this.rand;
@@ -1621,6 +1662,91 @@ export class World {
         this.excl.push({ x0: x - 7, x1: x + 7, z0: z - 7, z1: z + 7 });
       }
     }
+  }
+
+  // the elevated tram ("the El"): a loop over the downtown streets on steel portal frames, the columns on the
+  // sidewalks so traffic runs underneath. The route is the rectangle of street lines nearest downtown that stays
+  // clear of the expressways, their ramps, the avenues, covered streets and the hillside terraces.
+  buildTramLine() {
+    const { x0, z0, B } = CITY, DECK = 9.5, Rc = 6.5;
+    const lineX = (i) => x0 + i * B, lineZ = (j) => z0 + j * B;
+    const runOK = (ax, az, bx, bz) => {
+      const L = Math.hypot(bx - ax, bz - az);
+      for (let t = 0; t <= L; t += 3) {
+        const x = ax + (bx - ax) * t / L, z = az + (bz - az) * t / L;
+        if (this.onRampPath(x, z, 6) || this.bridgeAt(x, z, 1e9) !== null || (this.covers || []).some((c) => x > c.x0 - 4 && x < c.x1 + 4 && z > c.z0 - 4 && z < c.z1 + 4)) return false;
+        if (Math.abs(CITY.at(x, z) - CITY.y) > 0.01) return false; // level ground only
+      }
+      return true;
+    };
+    let best = null;
+    for (let i0 = 6; i0 < 15; i0++) for (let i1 = i0 + 2; i1 <= Math.min(14, i0 + 4); i1++) for (let j0 = 1; j0 < 11; j0++) for (let j1 = j0 + 2; j1 <= Math.min(10, j0 + 4); j1++) {
+      if ([i0, i1].includes(CITY.avenueI) || [j0, j1].includes(CITY.avenueJ)) continue;
+      const xa = lineX(i0), xb = lineX(i1), za = lineZ(j0), zb = lineZ(j1);
+      if (!runOK(xa, za, xb, za) || !runOK(xa, zb, xb, zb) || !runOK(xa, za, xa, zb) || !runOK(xb, za, xb, zb)) continue;
+      const score = Math.hypot((xa + xb) / 2 - DOWNTOWN.x, (za + zb) / 2 - DOWNTOWN.z) - ((i1 - i0) + (j1 - j0)) * 30;
+      if (!best || score < best.score) best = { score, xa, xb, za, zb };
+    }
+    this.tram = null;
+    if (!best) return;
+    const { xa, xb, za, zb } = best, y = CITY.y + DECK;
+    // the loop with rounded corners, a point every metre (clockwise seen from above)
+    const corners = [[xa, za, 1, 0, 0, 1], [xb, za, 0, 1, -1, 0], [xb, zb, -1, 0, 0, -1], [xa, zb, 0, -1, 1, 0]];
+    const pts = [];
+    for (let k = 0; k < 4; k++) {
+      const [cx, cz, dx, dz] = corners[k], [nx, nz, ndx, ndz] = corners[(k + 1) % 4];
+      const L = Math.hypot(nx - cx, nz - cz) - 2 * Rc;
+      for (let t = 0; t < L; t += 1) pts.push({ x: cx + dx * (Rc + t), z: cz + dz * (Rc + t) });
+      // quarter circle round the next corner
+      const ox = nx - dx * Rc + ndx * Rc, oz = nz - dz * Rc + ndz * Rc;
+      const a0 = Math.atan2(-ndz, -ndx), a1 = Math.atan2(dz, dx), da = ((a1 - a0 + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const n = Math.ceil(Math.abs(da) * Rc);
+      for (let q = 0; q < n; q++) { const a = a0 + da * q / n; pts.push({ x: ox + Math.cos(a) * Rc, z: oz + Math.sin(a) * Rc, curve: true }); }
+    }
+    let s = 0;
+    pts.forEach((p, k) => { if (k) s += Math.hypot(p.x - pts[k - 1].x, p.z - pts[k - 1].z); p.s = s; p.y = y; });
+    const len = s + Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].z - pts[pts.length - 1].z);
+    // portal frames: a column on each sidewalk every ~24 m, never inside a junction
+    const frames = [];
+    for (const [ax, az, bx, bz] of [[xa, za, xb, za], [xb, za, xb, zb], [xb, zb, xa, zb], [xa, zb, xa, za]]) {
+      const L = Math.hypot(bx - ax, bz - az), tx = (bx - ax) / L, tz = (bz - az) / L, alongX = Math.abs(tx) > 0.5;
+      for (let t = 12; t < L - 12; t += 16) {
+        const x = ax + tx * t, z = az + tz * t;
+        const nd = this.nodes.find((n) => n.city && Math.abs(n.x - x) < (alongX ? n.hx + 6 : 1) + 1 && Math.abs(n.z - z) < (alongX ? 1 : n.hz + 6) + 1);
+        if (nd) continue;
+        const hw = alongX ? CITY.hw(Math.round((z - z0) / B)) : CITY.vw(Math.round((x - x0) / B));
+        const o = hw + 1.3, f = { x, z, tx, tz, o };
+        frames.push(f);
+        for (const sd of [-1, 1]) {
+          const cx = x - tz * o * sd, cz = z + tx * o * sd;
+          this.colliders.push({ type: 'box', x: cx, z: cz, hx: 0.35, hz: 0.35, c: 1, s: 0, top: y, tall: true });
+          this.excl.push({ x0: cx - 1.2, x1: cx + 1.2, z0: cz - 1.2, z1: cz + 1.2 });
+        }
+      }
+    }
+    // two stations, on opposite sides of the loop
+    const stations = [0.25, 0.75].map((f) => { const want = len * f; let p = pts[0]; for (const q of pts) if (!q.curve && Math.abs(q.s - want) < Math.abs(p.s - want)) p = q; return { s: p.s, x: p.x, z: p.z }; });
+    // each platform's stair comes down on the sidewalk outside the columns, along the street: solid, and kept clear
+    for (const st of stations) {
+      const k = pts.findIndex((p) => p.s === st.s), a = pts[k - 1], b = pts[k + 1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      const tx = (b.x - a.x) / L, tz = (b.z - a.z) / L, alongX = Math.abs(tx) > 0.5;
+      const hw = alongX ? CITY.hw(Math.round((st.z - z0) / B)) : CITY.vw(Math.round((st.x - x0) / B));
+      Object.assign(st, { tx, tz, hw, so: hw + 2.6 });
+      for (const sd of [-1, 1]) {
+        const cx = st.x - tz * st.so * sd + tx * 27, cz = st.z + tx * st.so * sd + tz * 27;
+        this.colliders.push({ type: 'box', x: cx, z: cz, hx: 7.5, hz: 0.9, c: tx, s: tz, top: y, tall: true });
+        this.excl.push({ x0: cx - 8, x1: cx + 8, z0: cz - 8, z1: cz + 8 });
+      }
+    }
+    this.tram = { pts, len, y, frames, stations, box: best };
+  }
+
+  // is (x, z) under the elevated tram (within r of its centre line)?
+  nearTram(x, z, r = 4) {
+    if (!this.tram) return false;
+    const { xa, xb, za, zb } = this.tram.box;
+    if (x < xa - r || x > xb + r || z < za - r || z > zb + r) return false;
+    return Math.abs(x - xa) < r || Math.abs(x - xb) < r || Math.abs(z - za) < r || Math.abs(z - zb) < r;
   }
 
   // parking bays: lay-bys cut 2.4 m into the sidewalk, so cars parked along the street sit out of the traffic lane
@@ -1699,7 +1825,7 @@ export class World {
   buildRoadsideParking() {
     const R = this.rand;
     let kerb = 0;
-    const types = ['sedan', 'sedan', 'compact', 'compact', 'pickup', 'van', 'taxi'];
+    const types = ['sedan', 'sedan', 'compact', 'pickup', 'van', 'taxi', 'hatch', 'hatch', 'sedan2', 'sedan2', 'suv', 'suv', ...(R() < 0.25 ? ['sport'] : [])];
     for (const bay of this.bays) {
       for (let k = 0; k < bay.n; k++) {
         if (R() < 0.38) continue; // free spaces
@@ -2734,6 +2860,7 @@ export class World {
     this.buildParklets();
     this.buildRoadsideParking();
     this.buildBillboards();
+    this.buildExitSigns();
     // guardrails on the drop side of the mountain roads (breakable: you can go over).
     // On the big mountain they have gaps: nothing between you and the chasm.
     for (const e of this.edges) {
