@@ -221,16 +221,16 @@ export class TrafficManager {
   }
 
   // an ambulance or fire engine, out of sight, under lights and siren; with a destination it drives there and parks
-  spawnEmergency(type, player, cam, dest = null) {
+  spawnEmergency(type, player, cam, dest = null, close = false) {
     // responders set off from a few blocks away from the call (out of the player's sight); runs start near the player
     let sp = null;
     for (let k = 0; k < 6 && !sp; k++) {
-      sp = dest ? this.findSpawn({ pos: { x: dest.x, y: 0, z: dest.z } }, 160, 300, cam, true) : this.findSpawn(player, 230, 420, cam, true);
-      if (sp && Math.hypot(sp.x - player.pos.x, sp.z - player.pos.z) < 140) sp = null;
+      sp = dest ? this.findSpawn({ pos: { x: dest.x, y: 0, z: dest.z } }, close ? 50 : 160, close ? 130 : 300, cam, true) : this.findSpawn(player, 230, 420, cam, true);
+      if (sp && Math.hypot(sp.x - player.pos.x, sp.z - player.pos.z) < (close ? 90 : 140)) sp = null;
     }
     if (!sp) return null;
-    const v = this.getVehicle(type, type === 'firetruck' ? 'fire' : 'ambulance');
-    const d = new AIDriver(v, type === 'firetruck' ? 'fire' : 'ems');
+    const v = this.getVehicle(type, type === 'firetruck' ? 'fire' : type === 'police' ? 'police' : 'ambulance');
+    const d = new AIDriver(v, type === 'firetruck' ? 'fire' : type === 'police' ? 'police' : 'ems');
     d.aggression = 1.3;
     d.sirenOn = true;
     this.placeOnLane(d, sp.ln, sp.idx, 8);
@@ -711,7 +711,7 @@ export class TrafficManager {
           if (nd.light) {
             const s = this.world.lightState(nd, q[i].axis, this.time);
             if (d.mode === 'race') pv = Math.min(pv, 14); // racing: lights mean nothing
-            else if (d.sirenOn && d.role !== 'police') pv = Math.min(pv, 6); // under lights and siren: through the red, carefully
+            else if (d.sirenOn && (d.role !== 'police' || d.mode === 'respond')) pv = Math.min(pv, 6); // under lights and siren: through the red, carefully
             else if (s === 'R' || (s === 'Y' && acc > 12)) pv = 0;
           }
           // don't block the box: never drive into a junction without room to get out the other side
@@ -809,6 +809,11 @@ export class TrafficManager {
       d.jWait = jWaiting && speed < 1 ? (d.jWait || 0) + dt : 0;
     }
 
+    // closing in on a moving target (the loose tyrannosaur): drive straight at it once near
+    if (d.chaseTarget) {
+      const ct = d.chaseTarget, cd = Math.hypot(ct.x - pos.x, ct.z - pos.z);
+      if (cd < 110) { tx = ct.x; tz = ct.z; vDes = Math.max(Math.min(vDes, 16), cd < 20 ? 6 : 14); }
+    }
     // pull over for an emergency vehicle coming up behind with its siren on
     if (d.role === 'civ') for (const e of this.emergencies || []) {
       const ev = e.v;
@@ -846,7 +851,7 @@ export class TrafficManager {
         // racing: dart round whoever is in the way
         const side = aheadLat > 0 ? -1 : 1;
         tx += _rt.x * side * 3.4; tz += _rt.z * side * 3.4;
-      } else if (d.sirenOn && d.role !== 'police' && gap < 18 && aheadSpeed < 4) {
+      } else if (d.sirenOn && (d.role !== 'police' || d.mode === 'respond') && gap < 18 && aheadSpeed < 4) {
         // under lights: pull out and pass the stopped traffic on the left, steadily
         tx -= _rt.x * 3.6; tz -= _rt.z * 3.6;
         vDes = Math.min(vDes, 8);

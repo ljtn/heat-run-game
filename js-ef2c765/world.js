@@ -58,6 +58,8 @@ const RIVER_CTRL = [
 export const LAKE = { x: 640, z: 1090, r: 280 };
 // Primeval Valley: a drive-through prehistoric park out east, in its own flattened valley
 export const PARK = { x: 1680, z: 560, r: 300, name: 'PRIMEVAL VALLEY', gate: { x: 1395, z: 470 } };
+// the high-security compound off the east side of the loop, where the tyrannosaur is kept
+export const REX = { x: 2030, z: 520, half: 62, gateZ: 520 };
 const DOWNTOWN = { x: -698, z: -8 }; // the tower core stays where the old centre was
 export { DOWNTOWN };
 // giant snow-capped massifs. The first has a road spiralling up to a ring round its summit.
@@ -455,6 +457,7 @@ export class World {
         }
         // Primeval Valley: a broad level basin with only a gentle roll to it
         { const dp = Math.hypot(x - PARK.x, z - PARK.z), pm = 1 - smoothstep(PARK.r + 40, PARK.r + 260, dp); if (pm > 0) h = lerp(h, this.parkH + fbm(this.noiseA, x / 160, z / 160, 2) * 2.5, pm); }
+        { const dr = Math.max(Math.abs(x - REX.x), Math.abs(z - REX.z)), rm = 1 - smoothstep(REX.half + 40, REX.half + 200, dr); if (rm > 0) h = lerp(h, this.parkH, rm); } // the compound: dead level
         // giant peaks (they rise out of the river valleys, not through them)
         const pk = this.peakHeight(x, z);
         if (pk > 0) h += pk * smoothstep(10, 480, w);
@@ -654,8 +657,10 @@ export class World {
       const ids = [e(G, ring[0], [], 'village')];
       const mids = [[1590, 380], [1810, 400], [1850, 680], [1640, 770], [1500, 580]];
       for (let k = 0; k < ring.length; k++) ids.push(e(ring[k], ring[(k + 1) % ring.length], [mids[k]], 'village'));
+      const RG = n(REX.x - REX.half - 14, REX.gateZ);
+      ids.push(e(ring[2], RG, [[1910, 520]], 'village'));
       for (const id of ids) this.edges[id].park = true;
-      this.parkLoop = ids.slice(1);
+      this.parkLoop = ids.slice(1, 1 + ring.length);
       void cx; void cz;
     }
     const a3 = n(-1100, 1250), b3 = n(-980, 1340);
@@ -1703,7 +1708,7 @@ export class World {
     for (let k = 0; k < 900 && this.parkFlora.length < 260; k++) {
       const a = R() * Math.PI * 2, r = Math.sqrt(R()) * (PARK.r + 40), x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
       const inPad = this.paddockPolys.some((p) => p.test(x, z));
-      if (this.roadDistance(x, z) < 7 || this.fenceDist(x, z) < 4 || (!inPad && R() < 0.6)) continue;
+      if (this.roadDistance(x, z) < 7 || this.fenceDist(x, z) < 4 || (!inPad && R() < 0.6) || (Math.abs(x - REX.x) < REX.half + 25 && Math.abs(z - REX.z) < REX.half + 25)) continue;
       if (inPad && this.fenceDist(x, z) < 20 && R() < 0.7) continue; // room along the fence to see in
       const kind = R() < 0.4 ? 0 : R() < 0.55 ? 1 : 2, s = kind === 1 ? 1.2 + R() * 0.9 : 0.8 + R() * 0.6, y = this.terrainHeight(x, z);
       this.parkFlora.push({ x, z, y, kind, s, rot: R() * 6.28 });
@@ -1716,12 +1721,42 @@ export class World {
     const L = Math.hypot(p1.x - p0.x, p1.z - p0.z), tx = (p1.x - p0.x) / L, tz = (p1.z - p0.z) / L;
     this.parkGate = { x: p0.x + tx * 6, z: p0.z + tz * 6, y: p0.y, tx, tz, half: e0.halfW + 3.5 };
     for (const sd of [-1, 1]) this.colliders.push({ type: 'box', x: this.parkGate.x - tz * this.parkGate.half * sd, z: this.parkGate.z + tx * this.parkGate.half * sd, hx: 1.4, hz: 1.4, c: 1, s: 0, top: p0.y + 14, tall: true });
+    this.buildRexCompound();
     // where the sauropods start: two in each paddock
     this.dinoStarts = [];
     for (const pad of this.paddockPolys) for (let k = 0, t = 0; k < 2 && t < 400; t++) {
       const x = cx + (R() - 0.5) * 2 * PARK.r, z = cz + (R() - 0.5) * 2 * PARK.r;
       if (pad.test(x, z) && this.fenceDist(x, z) > 22 && this.dinoStarts.every((d) => Math.hypot(d.x - x, d.z - z) > 40)) { this.dinoStarts.push({ x, z, pad, heading: R() * 6.28 }); k++; }
     }
+  }
+
+  // the tyrannosaur compound: 8 m reinforced fence panels all round (each one gives way to a hard enough hit),
+  // a heavy closed gate, floodlight towers, a guard booth, warning signs everywhere, police cars out front
+  buildRexCompound() {
+    const { x: cx, z: cz, half: H, gateZ } = REX, y = this.terrainHeight(cx, cz);
+    this.excl.push({ x0: cx - H - 30, x1: cx + H + 10, z0: cz - H - 10, z1: cz + H + 10 });
+    const panels = [];
+    const side = (ax, az, bx, bz) => {
+      const L = Math.hypot(bx - ax, bz - az), n = Math.round(L / 4);
+      for (let k = 0; k < n; k++) {
+        const x0 = ax + (bx - ax) * k / n, z0 = az + (bz - az) * k / n, x1 = ax + (bx - ax) * (k + 1) / n, z1 = az + (bz - az) * (k + 1) / n;
+        const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, gate = Math.abs(ax - bx) < 1 && ax < cx && Math.abs(mz - gateZ) < 6;
+        const p = { x0, z0, x1, z1, y: this.terrainHeight(mx, mz), gate, broken: false, idx: panels.length };
+        panels.push(p);
+        const sl = Math.hypot(x1 - x0, z1 - z0);
+        this.colliders.push({ type: 'box', x: mx, z: mz, hx: sl / 2, hz: 0.35, c: (x1 - x0) / sl, s: (z1 - z0) / sl, top: p.y + 8, tall: true, breakable: true, breakV: gate ? 16 : 12.5, slow: 0.62, rexPanel: p.idx });
+      }
+    };
+    side(cx - H, cz - H, cx + H, cz - H); side(cx + H, cz - H, cx + H, cz + H); side(cx + H, cz + H, cx - H, cz + H); side(cx - H, cz + H, cx - H, cz - H);
+    // floodlight towers at the corners, a guard booth by the gate
+    const towers = [[cx - H - 4, cz - H - 4], [cx + H + 4, cz - H - 4], [cx + H + 4, cz + H + 4], [cx - H - 4, cz + H + 4]];
+    for (const [x, z] of towers) this.colliders.push({ type: 'circle', x, z, r: 0.8, top: y + 18, tall: true });
+    const booth = { x: cx - H - 9, z: gateZ - 11 };
+    this.colliders.push({ type: 'box', x: booth.x, z: booth.z, hx: 1.6, hz: 1.6, c: 1, s: 0, top: y + 3, tall: true });
+    // police cars on guard outside the gate, nose out
+    const types = [[cx - H - 20, gateZ + 9, Math.PI / 2], [cx - H - 20, gateZ - 9, Math.PI / 2 + 0.2], [cx - H - 8, gateZ + 18, 0.4]];
+    for (const [x, z, heading] of types) this.parkedCars.push({ x, z, y: this.terrainHeight(x, z), heading, type: 'police', scheme: 'police', guard: true });
+    this.rex = { x: cx, z: cz, half: H, y, gateZ, panels, towers, booth };
   }
 
   // tall roadside billboards along the country highways and roads, angled to face oncoming traffic

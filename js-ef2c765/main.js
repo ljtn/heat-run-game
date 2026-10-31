@@ -25,7 +25,7 @@ import { Atmosphere, PRESETS } from './sky.js';
 import { Tram } from './tram.js';
 import { FireSystem } from './fires.js';
 import { Races } from './race.js';
-import { PrimevalValley } from './dinos.js';
+import { PrimevalValley, TRex } from './dinos.js';
 import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
@@ -113,6 +113,7 @@ class Game {
     buildTerraces(world, scene);
     this.tram = new Tram(world, scene);
     this.park = new PrimevalValley(world, scene);
+    this.rex = world.rex ? new TRex(scene, world, this) : null;
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -171,7 +172,7 @@ class Game {
     // parked cars in the garages: real cars with the handbrake on, asleep until you come close
     const PCOL = [0xb8872a, 0x5d6b2c, 0xb5541f, 0x6b4a2e, 0xd9cfb4, 0x8fb2c9, 0x7a1f1f, 0x2e3a52, 0x9a9a8e, 0x1a1a1a];
     this.parked = world.parkedCars.map((p) => {
-      const v = new Vehicle(world, p.type, PCOL[Math.floor(Math.random() * PCOL.length)], p.type === 'taxi' ? 'taxi' : 'plain');
+      const v = new Vehicle(world, p.type, p.scheme === 'police' ? 0xffffff : PCOL[Math.floor(Math.random() * PCOL.length)], p.scheme || (p.type === 'taxi' ? 'taxi' : 'plain'));
       v.resetTo(p.x, p.y, p.z, p.heading, 0);
       v.input.handbrake = 1; v.input.brake = 1;
       v.sleeping = true;
@@ -486,6 +487,12 @@ class Game {
     };
     C.onBreak = (c, v, px, pz) => {
       const ref = c.ref;
+      if (c.rexPanel !== undefined) {
+        this.effects.burstSparks(px, v.pos.y + 1, pz, v.vel.x * 0.05, v.vel.z * 0.05, 14);
+        this.audio.crash && this.audio.crash(1);
+        if (this.park.breakPanel(c.rexPanel, this.rex)) { this.hud.message('THE T-REX IS LOOSE!', 4, 'crime'); this.hud.message('Get out of there!', 3, '', 1.5); }
+        return;
+      }
       if (c.mullion) {
         c.mullion.broken = true;
         this.meshes.mats.mullionBreak(c.mullion);
@@ -652,6 +659,7 @@ class Game {
     repairCar(this.player.car);
     if (this.state === 'dead' && this.deathPos) this.spawnPlayer(this.deathPos);
     else this.spawnAtStart();
+
     this.deathPos = null;
     this.state = 'drive';
   }
@@ -822,7 +830,23 @@ class Game {
     this.tram.update(dt, this.nightMode);
     this.fires.update(dt, this.player, this.time, this.state === 'drive');
     this.races.update(dt, this.state === 'drive');
+    this.park.night = this.nightMode;
     this.park.update(dt, this.time, this.camera.position);
+    if (this.rex) {
+      const rd = Math.hypot(this.camera.position.x - this.rex.x, this.camera.position.z - this.rex.z);
+      this.rex.root.visible = rd < 1500;
+      if (rd < 1500 || this.rex.state !== 'caged') this.rex.update(Math.min(dt, 0.05), this.time);
+      // loose: the police are sent after it, again and again
+      if (this.rex.state === 'loose' && this.state === 'drive') {
+        this.rexCallT = (this.rexCallT || 0) - dt;
+        if (this.rexCallT <= 0) {
+          this.rexCallT = 8;
+          const T = this.traffic;
+          for (const d of T.drivers) if (d.rexCall) { T.routeTo(d, this.rex.x, this.rex.z); d.chaseTarget = this.rex; }
+          if (T.drivers.filter((d) => d.rexCall).length < 4) { const d = T.spawnEmergency('police', this.player, this.camera, { x: this.rex.x, z: this.rex.z }, true); if (d) { d.rexCall = true; d.chaseTarget = this.rex; } }
+        }
+      }
+    }
     if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));

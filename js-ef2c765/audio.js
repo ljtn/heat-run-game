@@ -311,6 +311,45 @@ export class AudioEngine {
     }
   }
 
+  // the tyrannosaur's roar: a deep sawtooth growl sliding down, a sub rumble, a breathy rasp on top
+  roar(vol = 1) {
+    if (!this.enabled || this.muted || vol < 0.03) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.02, D = 2.6;
+    const out = ctx.createGain(); out.gain.value = Math.min(1, vol) * 0.9; out.connect(this.master);
+    const env = ctx.createGain(); env.gain.setValueAtTime(0, t0); env.gain.linearRampToValueAtTime(1, t0 + 0.35); env.gain.setValueAtTime(0.9, t0 + D * 0.6); env.gain.exponentialRampToValueAtTime(0.001, t0 + D); env.connect(out);
+    for (const [type, f0, f1, g0] of [['sawtooth', 110, 62, 0.35], ['sawtooth', 83, 47, 0.3], ['sine', 42, 30, 0.6]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + D);
+      lfo.frequency.value = 9 + Math.random() * 4; lg.gain.value = f0 * 0.05; lfo.connect(lg).connect(o.frequency);
+      g.gain.value = g0; o.connect(g).connect(env); o.start(t0); lfo.start(t0); o.stop(t0 + D); lfo.stop(t0 + D);
+    }
+    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * D, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    n.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4; bp.frequency.setValueAtTime(700, t0); bp.frequency.exponentialRampToValueAtTime(220, t0 + D);
+    const ng = ctx.createGain(); ng.gain.value = 0.5;
+    n.connect(bp).connect(ng).connect(env); n.start(t0);
+  }
+
+  // a low rumbling growl: a throaty sub tone wavering under filtered breath
+  growl(vol = 1) {
+    if (!this.enabled || this.muted || vol < 0.03) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.02, D = 1.1 + Math.random() * 0.6;
+    const out = ctx.createGain(); out.connect(this.master);
+    out.gain.setValueAtTime(0, t0); out.gain.linearRampToValueAtTime(Math.min(1, vol) * 0.55, t0 + 0.2); out.gain.exponentialRampToValueAtTime(0.001, t0 + D);
+    for (const [type, f, g0] of [['sawtooth', 58, 0.35], ['sine', 36, 0.7]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = type; o.frequency.value = f; lfo.frequency.value = 6 + Math.random() * 5; lg.gain.value = f * 0.12; lfo.connect(lg).connect(o.frequency);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
+      g.gain.value = g0; o.connect(lp).connect(g).connect(out); o.start(t0); lfo.start(t0); o.stop(t0 + D); lfo.stop(t0 + D);
+    }
+    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * D, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    n.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 260; bp.Q.value = 2;
+    const ng = ctx.createGain(); ng.gain.value = 0.35; n.connect(bp).connect(ng).connect(out); n.start(t0);
+  }
+
   splash() {
     if (!this.enabled || this.muted) return;
     const ctx = this.ctx, t = ctx.currentTime;
