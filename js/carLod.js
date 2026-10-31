@@ -1,9 +1,10 @@
 // Far-away cars are drawn as one merged, vertex-coloured mesh instead of ~100 separate parts.
 import * as THREE from 'three';
 import { mergeGeometries } from '../lib/addons/utils/BufferGeometryUtils.js';
+import { softSpot } from './carModel.js';
 
 const cache = new Map();
-const lodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.25 });
+const lodMat = softSpot(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.25 }));
 const _inv = new THREE.Matrix4(), _m = new THREE.Matrix4(), _c = new THREE.Color();
 
 export function carLodGeometry(v) {

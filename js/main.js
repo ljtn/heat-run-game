@@ -311,11 +311,11 @@ class Game {
     m.water.color.set(P.night ? 0x0c1a22 : 0x1e3f46); m.poolWater.color.copy(m.water.color);
     const lightsOn = L > 0.3;
     headlightMaterial().emissiveIntensity = lightsOn ? 5 : 0.3;
-    this.spotPower = lightsOn ? 380 * L : 0;
+    this.spotPower = lightsOn ? 230 * L : 0; // (enough to light the road; more and anything facing you up close goes white)
     this.headlights = lightsOn;
     this.effects.setLight(new THREE.Color(P.smoke));
-    this.bloom.strength = 0.22 + L * 0.5;
-    this.bloom.threshold = P.night ? 0.75 : 0.92;
+    this.bloom.strength = 0.22 + L * 0.3;
+    this.bloom.threshold = P.night ? 0.84 : 0.94;
     this.grade.uniforms.uLift.value.set(...(name === 'dusk' ? [1.04, 0.99, 0.93] : name === 'night' ? [0.92, 0.98, 1.08] : [1.0, 1.0, 1.0]));
   }
 

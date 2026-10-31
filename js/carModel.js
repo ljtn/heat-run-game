@@ -47,6 +47,19 @@ export const BODY_STYLES = {
   },
 };
 
+// Car surfaces take the headlight beams (the only spot lights) at a sixth: a panel square-on to a headlight
+// a few metres away would otherwise catch ~10x the light the road does and blow out to white.
+export function softSpot(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin
+      .replace('getSpotLightInfo( spotLight, geometryPosition, directLight );', 'getSpotLightInfo( spotLight, geometryPosition, directLight ); directLight.color *= 0.15;'));
+  };
+  mat.customProgramCacheKey = () => 'softspot';
+  return mat;
+}
+
 const shared = {};
 function sharedMats() {
   if (shared.glass) return shared;
@@ -63,6 +76,7 @@ function sharedMats() {
   shared.head = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, emissive: 0xfff3dd, emissiveIntensity: 0.0, roughness: 0.1, metalness: 0.3 });
   shared.vinyl = [0x161616, 0xe9e3d3, 0x4a3426].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 }));
   shared.seat = new THREE.MeshStandardMaterial({ color: 0x2a1d16, roughness: 0.9 });
+  for (const m of Object.values(shared).flat()) softSpot(m);
   return shared;
 }
 export function headlightMaterial() { return sharedMats().head; }
@@ -75,6 +89,7 @@ function paint(hex) {
       // the sun and sky show up as small crisp glints on curves and edges instead
       color: hex, vertexColors: true, roughness: 0.58, metalness: 0.08, clearcoat: 0.45, clearcoatRoughness: 0.05, envMapIntensity: 0.75,
     }));
+    softSpot(paintCache.get(hex));
   }
   return paintCache.get(hex);
 }
@@ -284,7 +299,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
       const u = c.u0 + (c.u1 - c.u0) * zn;
       return [(xn * 2 - 1) * (W / 2) * 0.995, st.belt - 0.15 + (c.top - st.belt + 0.15) * yn, -L / 2 + u * L];
     }, 1, 1, 1);
-    const cargoMat = new THREE.MeshStandardMaterial({ color: [0xe8e4da, 0xd8c9a0, 0xc8d4dc][Math.floor(Math.random() * 3)], roughness: 0.6 });
+    const cargoMat = softSpot(new THREE.MeshStandardMaterial({ color: [0xe8e4da, 0xd8c9a0, 0xc8d4dc][Math.floor(Math.random() * 3)], roughness: 0.6 }));
     addMesh(model, g, cargoMat, deformGeos);
     // ribs and rear door seam
     for (let k = 1; k < 7; k++) {
@@ -367,7 +382,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   addMesh(model, boxAt(0.3, 0.15, 0.01, 0, st.clear + 0.36, back + 0.005), M.plate, null, false);
 
   // ---- rear fascia ----
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x5a0a08, emissive: 0xff1a0a, emissiveIntensity: 0.25, roughness: 0.25 });
+  const tailMat = softSpot(new THREE.MeshStandardMaterial({ color: 0x5a0a08, emissive: 0xff1a0a, emissiveIntensity: 0.25, roughness: 0.25 }));
   const tails = [];
   const tailY = st.tail - 0.17;
   addMesh(model, boxAt(W * 0.8, 0.17, 0.02, 0, tailY, back - 0.012), M.chrome, null, false);
@@ -526,7 +541,7 @@ function crackedGlassMaterial() {
   }
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
-  crackedGlass = new THREE.MeshStandardMaterial({ map: t, roughness: 0.45, metalness: 0.1 });
+  crackedGlass = softSpot(new THREE.MeshStandardMaterial({ map: t, roughness: 0.45, metalness: 0.1 }));
   return crackedGlass;
 }
 
