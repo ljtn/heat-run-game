@@ -606,13 +606,14 @@ export class Vehicle {
           p.ty = r < 0.5 ? (Math.random() - 0.5) * 0.3 : r < 0.8 ? (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5) : (Math.random() - 0.5) * 1.6;
           p.tp = (Math.random() - 0.5) * 0.25;
         }
-        const ty = env > 0 ? (this.gestureSide || 1) * 0.9 + Math.sin(now * 9 + i) * 0.25 : p.ty;
-        p.yaw += (ty - p.yaw) * Math.min(1, dt * (env > 0 ? 8 : 3));
-        p.pitch += ((env > 0 ? -0.15 : p.tp) - p.pitch) * Math.min(1, dt * 3);
+        // a slow "what are you doing?!": look over at the other car, forearms up, palms opening outward and back
+        const ty = env > 0 ? (this.gestureSide || 1) * 0.8 : p.ty;
+        p.yaw += (ty - p.yaw) * Math.min(1, dt * (env > 0 ? 4 : 3));
+        p.pitch += ((env > 0 ? 0.08 * Math.sin((3.5 - g) * 4.4) : p.tp) - p.pitch) * Math.min(1, dt * 3);
         F.u.uHead.value[i].set(p.yaw, p.pitch);
-        const shake = Math.sin(now * 13 + i * 1.7) * 0.35;
-        const e2 = this.type === 'bus' && i > 0 ? 0 : env; // on a bus only the driver throws their hands up
-        F.u.uArm.value[i].set(e2 * (1.45 + shake * 0.6), e2 * (1.45 - shake * 0.6)); // (up and forward to about face height, waving)
+        const e2 = this.type === 'bus' && i > 0 ? 0 : env; // on a bus only the driver does it
+        const open = 0.5 - 0.5 * Math.cos((3.5 - Math.max(0, g)) * 4.4); // two slow outward-and-back swings
+        F.u.uArm.value[i].set(e2 * 0.75, e2 * (0.15 + 0.55 * open));
       });
     }
     // turn signals: 1.5 blinks a second on the side the driver is turning (or both, as hazards)

@@ -120,8 +120,8 @@ function folkMaterial() {
         int pi = int(aRig.x + 0.5); float part = aRig.y;
         vec3 d = transformed - aPivot;
         if (part > 0.5 && part < 1.5) { d = rotX(rotY(d, uHead[pi].x), uHead[pi].y); transformed = aPivot + d; }
-        else if (part > 1.5) { float r = part < 2.5 ? uArm[pi].x : uArm[pi].y, side = part < 2.5 ? -1.0 : 1.0;
-          d = rotZ(rotX(d, r), side * r * 0.25); transformed = aPivot + d; }`);
+        else if (part > 1.5) { float side = part < 2.5 ? -1.0 : 1.0; // uArm: x = lift forward, y = open outward
+          d = rotZ(rotX(d, uArm[pi].x), side * uArm[pi].y); transformed = aPivot + d; }`);
   };
   m.customProgramCacheKey = () => 'folk';
   return softSpot(m);
