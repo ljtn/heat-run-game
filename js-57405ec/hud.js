@@ -1,5 +1,5 @@
 // HUD: speedo, tach, heat, damage, messages, minimap and full map
-import { HALF, SIZE, CITY, SURF, NV, N, CELL, PEAKS } from './world.js';
+import { HALF, SIZE, CITY, SURF, NV, N, CELL, PEAKS, PARK } from './world.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -112,6 +112,7 @@ export class HUD {
       if (p.x > CITY.x1 - 150) return 'RIVERSIDE';
       return 'MERIDIAN CITY';
     }
+    if (Math.hypot(p.x - PARK.x, p.z - PARK.z) < PARK.r + 80) return PARK.name;
     for (const v of w.villages) if (Math.hypot(p.x - v.x, p.z - v.z) < v.r) return v.name.toUpperCase();
     for (const f of w.farms || []) if (p.x > f.x0 && p.x < f.x1 && p.z > f.z0 && p.z < f.z1) return f.name;
     for (const P of PEAKS) if (Math.hypot(p.x - P.x, p.z - P.z) < P.R * 0.85) return P.name;

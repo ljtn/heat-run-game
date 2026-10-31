@@ -620,8 +620,10 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
       H(new THREE.SphereGeometry(0.095, 12, 10).scale(0.88, 1.12, 1).translate(x, hy, z), skin);
       H(new THREE.BoxGeometry(0.03, 0.05, 0.04).translate(x, hy - 0.01, z - 0.09), skin); // nose
       for (const ex of [-1, 1]) H(new THREE.SphereGeometry(0.022, 6, 5).scale(0.6, 1, 1).translate(x + ex * 0.085, hy, z + 0.005), skin); // ears
+      for (const ex of [-1, 1]) H(new THREE.SphereGeometry(0.014, 6, 5).translate(x + ex * 0.034, hy + 0.025, z - 0.083), 0x1a1410); // eyes
+      H(new THREE.SphereGeometry(0.05, 8, 6).scale(1, 0.7, 0.9).translate(x, hy - 0.085, z - 0.055), skin); // jaw and chin
       const style = Math.random();
-      if (style < 0.45) H(new THREE.SphereGeometry(0.1, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.9, 1.05, 1.02).translate(x, hy + 0.012, z + 0.012), hair);
+      if (style < 0.5 || style >= 0.88) H(new THREE.SphereGeometry(0.1, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.9, 1.05, 1.02).translate(x, hy + 0.012, z + 0.012), hair);
       else if (style < 0.75) { // long hair down the back
         H(new THREE.SphereGeometry(0.104, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6).scale(0.92, 1.05, 1.04).translate(x, hy + 0.01, z + 0.01), hair);
         H(new THREE.BoxGeometry(0.18, 0.22, 0.06).translate(x, hy - 0.1, z + 0.08), hair);
@@ -629,9 +631,10 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
         const cap = pick([0xc81e1e, 0x1e3a6a, 0x2a2a2a, 0xe8e2d4, 0x2e6a3a]);
         H(new THREE.SphereGeometry(0.102, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.45).translate(x, hy + 0.02, z + 0.005), cap);
         H(new THREE.BoxGeometry(0.15, 0.015, 0.1).translate(x, hy + 0.045, z - 0.1), cap);
-      } // (else bald)
-      folk.push(tint(new THREE.CylinderGeometry(0.042, 0.048, 0.1, 8).translate(x, hy - 0.14, z + 0.01), skin)); // neck
-      folk.push(tint(new THREE.CylinderGeometry(0.19, 0.155, 0.44, 10).scale(1, 1, 0.62).translate(x, hy - 0.4, z + 0.03), shirt)); // torso
+      }
+      folk.push(tint(new THREE.CylinderGeometry(0.058, 0.066, 0.08, 10).translate(x, hy - 0.12, z + 0.015), skin)); // neck: short and solid
+      folk.push(tint(new THREE.CylinderGeometry(0.19, 0.155, 0.44, 10).scale(1, 1, 0.62).translate(x, hy - 0.37, z + 0.03), shirt)); // torso
+      folk.push(tint(new THREE.SphereGeometry(0.15, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1.25, 0.55, 0.75).translate(x, hy - 0.16, z + 0.03), shirt)); // trapezius / collar sloping up to the neck
       for (const sx of [-1, 1]) {
         folk.push(tint(new THREE.SphereGeometry(0.075, 8, 6).translate(x + sx * 0.18, hy - 0.22, z + 0.03), shirt)); // shoulder
         const part = sx < 0 ? 2 : 3, sh = [x + sx * 0.19, hy - 0.22, z + 0.03];

@@ -25,6 +25,7 @@ import { Atmosphere, PRESETS } from './sky.js';
 import { Tram } from './tram.js';
 import { FireSystem } from './fires.js';
 import { Races } from './race.js';
+import { PrimevalValley } from './dinos.js';
 import { PropSystem, buildShopSigns, buildAlleyDressing, buildBunting, buildAdSigns, buildTerraces } from './props.js';
 import { Weather } from './weather.js';
 
@@ -53,6 +54,7 @@ const STARTS = [
   { key: 'river', label: 'RIVERSIDE', desc: 'The east bank highways', x: -236, z: 100 },
   { key: 'ashford', label: 'ASHFORD', desc: 'Village in the hills', x: 700, z: -900 },
   { key: 'lakeview', label: 'LAKEVIEW', desc: 'Lakeside village', x: 1050, z: 550 },
+  { key: 'park', label: 'PRIMEVAL VALLEY', desc: 'Dinosaur drive-through', x: 1340, z: 445 },
   { key: 'harlow', label: 'HARLOW', desc: 'Farm country', x: -950, z: 1150 },
   { key: 'millbrook', label: 'MILLBROOK', desc: 'Mountain hamlet', x: -1250, z: -1250 },
   { key: 'ridge', label: 'HIGH RIDGE', desc: 'Ridge road', x: 1380, z: -520 },
@@ -110,6 +112,7 @@ class Game {
     buildAdSigns(world, scene, this.meshes.mats);
     buildTerraces(world, scene);
     this.tram = new Tram(world, scene);
+    this.park = new PrimevalValley(world, scene);
     buildBunting(world, scene, this.meshes.mats);
     this.fixtures = new WallFixtures(world, scene);
     this.atmo = new Atmosphere(renderer, scene);
@@ -819,6 +822,7 @@ class Game {
     this.tram.update(dt, this.nightMode);
     this.fires.update(dt, this.player, this.time, this.state === 'drive');
     this.races.update(dt, this.state === 'drive');
+    this.park.update(dt, this.time, this.camera.position);
     if (this.meshes.mats.buntingTime) this.meshes.mats.buntingTime.value = this.time;
     this.grade.uniforms.uTime.value = this.time % 10;
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360)));

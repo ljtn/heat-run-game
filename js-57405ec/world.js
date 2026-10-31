@@ -56,6 +56,8 @@ const RIVER_CTRL = [
   [-115, -50], [-40, 300], [120, 700], [260, 920], [400, 1050],
 ];
 export const LAKE = { x: 640, z: 1090, r: 280 };
+// Primeval Valley: a drive-through prehistoric park out east, in its own flattened valley
+export const PARK = { x: 1680, z: 560, r: 300, name: 'PRIMEVAL VALLEY', gate: { x: 1395, z: 470 } };
 const DOWNTOWN = { x: -698, z: -8 }; // the tower core stays where the old centre was
 export { DOWNTOWN };
 // giant snow-capped massifs. The first has a road spiralling up to a ring round its summit.
@@ -189,6 +191,7 @@ export class World {
     this.classifySurfaces();
     progress('Building the city', 0.5); await yieldFrame();
     this.buildCity();
+    this.buildPark();
     this.buildVillages();
     this.buildFarms();
     // driveway cars: settle them on the final ground, and drop any left on a slope they'd roll down
@@ -274,7 +277,7 @@ export class World {
   }
 
   placePonds() {
-    const R = mulberry32(4242), vil = [[700, -900], [1050, 550], [-950, 1150], [-1250, -1250]];
+    const R = mulberry32(4242), vil = [[700, -900], [1050, 550], [-950, 1150], [-1250, -1250], [PARK.x, PARK.z]];
     this.ponds = [];
     for (let tries = 0; tries < 3000 && this.ponds.length < 14; tries++) {
       const x = (R() * 2 - 1) * (HALF - 320), z = (R() * 2 - 1) * (HALF - 320);
@@ -427,6 +430,7 @@ export class World {
     const H = this.heights, wd = this.waterDist;
     const vil = [[700, -900], [1050, 550], [-950, 1150], [-1250, -1250]];
     const vilH = vil.map(([x, z]) => this.baseHeight(x, z));
+    this.parkH = Math.max(14, this.baseHeight(PARK.x, PARK.z) * 0.5 + 10);
     for (let j = 0; j <= N; j++) {
       const z = -HALF + j * CELL;
       for (let i = 0; i <= N; i++) {
@@ -449,6 +453,8 @@ export class World {
           const vm = 1 - smoothstep(80, 260, dv);
           if (vm > 0) h = lerp(h, vilH[v], vm * 0.85);
         }
+        // Primeval Valley: a broad level basin with only a gentle roll to it
+        { const dp = Math.hypot(x - PARK.x, z - PARK.z), pm = 1 - smoothstep(PARK.r + 40, PARK.r + 260, dp); if (pm > 0) h = lerp(h, this.parkH + fbm(this.noiseA, x / 160, z / 160, 2) * 2.5, pm); }
         // giant peaks (they rise out of the river valleys, not through them)
         const pk = this.peakHeight(x, z);
         if (pk > 0) h += pk * smoothstep(10, 480, w);
@@ -640,6 +646,18 @@ export class World {
     e(this.splitNear(1250, -880), b1, [[1400, -1050], [1360, -1290], [1120, -1400], [900, -1310]], 'mountain');
     e(HAM, this.splitNear(-620, -1110), [[-1420, -1400], [-1200, -1480], [-900, -1460], [-680, -1330]], 'mountain');
     this.buildPeakRoad(PEAKS[0]);
+    // Primeval Valley: a spur off the country road to the park gate, then a loop round the paddocks
+    {
+      const G = n(PARK.gate.x, PARK.gate.z), cx = PARK.x, cz = PARK.z;
+      e(this.splitNear(1180, 330), G, [[1290, 400]], 'road');
+      const ring = [[1515, 470], [1690, 350], [1870, 520], [1760, 760], [1540, 690]].map(([x, z]) => n(x, z));
+      const ids = [e(G, ring[0], [], 'village')];
+      const mids = [[1590, 380], [1810, 400], [1850, 680], [1640, 770], [1500, 580]];
+      for (let k = 0; k < ring.length; k++) ids.push(e(ring[k], ring[(k + 1) % ring.length], [mids[k]], 'village'));
+      for (const id of ids) this.edges[id].park = true;
+      this.parkLoop = ids.slice(1);
+      void cx; void cz;
+    }
     const a3 = n(-1100, 1250), b3 = n(-980, 1340);
     e(VC, a3, [], 'village'); e(a3, b3, [[-1060, 1330]], 'village'); e(b3, VC, [[-920, 1250]], 'village');
     this.villages = [
@@ -1635,6 +1653,74 @@ export class World {
           }
         }
       }
+    }
+  }
+
+  // Primeval Valley: the gate arch over the entrance road, two fenced paddocks inside the loop road (north and
+  // south of a dividing fence), prehistoric planting, and where the sauropods start out
+  buildPark() {
+    const R = mulberry32(1993), cx = PARK.x, cz = PARK.z;
+    this.excl.push({ x0: cx - PARK.r - 60, x1: cx + PARK.r + 60, z0: cz - PARK.r - 60, z1: cz + PARK.r + 60 }); // no ordinary woods, houses or props
+    // the loop road as one closed polyline
+    const loop = [];
+    for (const id of this.parkLoop) { const e = this.edges[id]; for (const p of e.pts) loop.push(p); }
+    // fence: the loop pulled 24 m in toward the middle (posts every 4 m)
+    const fence = [];
+    for (let i = 0; i < loop.length; i += 3) {
+      const p = loop[i], dx = cx - p.x, dz = cz - p.z, L = Math.hypot(dx, dz) || 1;
+      fence.push({ x: p.x + dx / L * 24, z: p.z + dz / L * 24 });
+    }
+    // a dividing fence east-west through the middle, splitting it into a north and a south paddock
+    const crossZ = cz + 20;
+    const xsAt = (zq) => { const xs = []; for (let i = 0; i < fence.length; i++) { const a = fence[i], b = fence[(i + 1) % fence.length]; if ((a.z - zq) * (b.z - zq) < 0) xs.push(a.x + (b.x - a.x) * (zq - a.z) / (b.z - a.z)); } return xs.sort((p, q) => p - q); };
+    const cross = xsAt(crossZ);
+    const lines = [fence.concat([fence[0]])];
+    if (cross.length >= 2) lines.push([{ x: cross[0], z: crossZ }, { x: cross[cross.length - 1], z: crossZ }]);
+    this.parkFences = [];
+    for (const line of lines) for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i], b = line[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 0.5) continue;
+      const n = Math.ceil(L / 4);
+      for (let k = 0; k < n; k++) {
+        const ax = a.x + (b.x - a.x) * k / n, az = a.z + (b.z - a.z) * k / n, bx = a.x + (b.x - a.x) * (k + 1) / n, bz = a.z + (b.z - a.z) * (k + 1) / n;
+        const y = this.terrainHeight(ax, az);
+        this.parkFences.push({ ax, az, bx, bz, y });
+        const sl = Math.hypot(bx - ax, bz - az);
+        this.colliders.push({ type: 'box', x: (ax + bx) / 2, z: (az + bz) / 2, hx: sl / 2, hz: 0.25, c: (bx - ax) / sl, s: (bz - az) / sl, top: y + 6, tall: true });
+      }
+    }
+    // the two paddocks as polygons (for keeping the animals in): fence ring clipped at the divide
+    const inside = (poly, x, z) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.z > z) !== (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) c = !c; } return c; };
+    const ring = fence;
+    this.paddockPolys = [
+      { test: (x, z) => inside(ring, x, z) && z < crossZ - 2 }, // north
+      { test: (x, z) => inside(ring, x, z) && z > crossZ + 2 }, // south
+    ];
+    // distance from a point to the nearest fence (to keep the big animals clear of it)
+    this.fenceDist = (x, z) => { let m = 1e9; for (const f of this.parkFences) { const dx = f.bx - f.ax, dz = f.bz - f.az, t = Math.max(0, Math.min(1, ((x - f.ax) * dx + (z - f.az) * dz) / (dx * dx + dz * dz))); m = Math.min(m, Math.hypot(f.ax + dx * t - x, f.az + dz * t - z)); } return m; };
+    // prehistoric planting: tree ferns, monkey-puzzle pines and cycads, thick in the paddocks, a few by the road
+    this.parkFlora = [];
+    for (let k = 0; k < 900 && this.parkFlora.length < 260; k++) {
+      const a = R() * Math.PI * 2, r = Math.sqrt(R()) * (PARK.r + 40), x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      const inPad = this.paddockPolys.some((p) => p.test(x, z));
+      if (this.roadDistance(x, z) < 7 || this.fenceDist(x, z) < 4 || (!inPad && R() < 0.6)) continue;
+      if (inPad && this.fenceDist(x, z) < 20 && R() < 0.7) continue; // room along the fence to see in
+      const kind = R() < 0.4 ? 0 : R() < 0.55 ? 1 : 2, s = kind === 1 ? 1.2 + R() * 0.9 : 0.8 + R() * 0.6, y = this.terrainHeight(x, z);
+      this.parkFlora.push({ x, z, y, kind, s, rot: R() * 6.28 });
+      this.colliders.push({ type: 'circle', x, z, r: kind === 1 ? 0.6 * s : 0.35 * s, top: y + 6 });
+    }
+    // the gate: two great pillars either side of the entrance road
+    const G = PARK.gate, g1 = this.nodes.find((nd) => Math.hypot(nd.x - G.x, nd.z - G.z) < 1);
+    const e0 = this.edges[g1.edges.find((id) => this.edges[id].park)];
+    const P = e0.a === g1.id ? e0.pts : e0.pts.slice().reverse(), p0 = P[0], p1 = P[Math.min(4, P.length - 1)];
+    const L = Math.hypot(p1.x - p0.x, p1.z - p0.z), tx = (p1.x - p0.x) / L, tz = (p1.z - p0.z) / L;
+    this.parkGate = { x: p0.x + tx * 6, z: p0.z + tz * 6, y: p0.y, tx, tz, half: e0.halfW + 3.5 };
+    for (const sd of [-1, 1]) this.colliders.push({ type: 'box', x: this.parkGate.x - tz * this.parkGate.half * sd, z: this.parkGate.z + tx * this.parkGate.half * sd, hx: 1.4, hz: 1.4, c: 1, s: 0, top: p0.y + 14, tall: true });
+    // where the sauropods start: two in each paddock
+    this.dinoStarts = [];
+    for (const pad of this.paddockPolys) for (let k = 0, t = 0; k < 2 && t < 400; t++) {
+      const x = cx + (R() - 0.5) * 2 * PARK.r, z = cz + (R() - 0.5) * 2 * PARK.r;
+      if (pad.test(x, z) && this.fenceDist(x, z) > 22 && this.dinoStarts.every((d) => Math.hypot(d.x - x, d.z - z) > 40)) { this.dinoStarts.push({ x, z, pad, heading: R() * 6.28 }); k++; }
     }
   }
 
