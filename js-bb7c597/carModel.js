@@ -30,14 +30,14 @@ export const BODY_STYLES = {
   // city transit bus
   bus: {
     L: 11.0, W: 2.5, clear: 0.32, nose: 1.2, hood: 1.24, belt: 1.25, tail: 1.25, hoodEnd: 0.03,
-    cabStart: 0.035, cabEnd: 0.99, roof: 3.05, rakeF: 0.12, rakeR: 0.05, cabW: 0.99, topW: 0.97,
-    bPillar: false, cPanel: 0, pillars: 7, quad: false, grilleH: 0.3, chromeBump: false,
+    cabStart: 0.035, cabEnd: 0.99, roof: 3.05, rakeF: 0.42, rakeR: 0.18, cabW: 0.99, topW: 0.95,
+    bPillar: false, cPanel: 0, pillars: 7, quad: false, grilleH: 0.3, chromeBump: false, soft: true, roll: 1.8,
   },
   // box truck
   truck: {
     L: 10.2, W: 2.55, clear: 0.42, nose: 1.45, hood: 1.6, belt: 1.65, tail: 1.5, hoodEnd: 0.1,
-    cabStart: 0.11, cabEnd: 0.26, roof: 3.0, rakeF: 0.22, rakeR: 0.02, cabW: 0.95, topW: 0.93,
-    bPillar: false, cPanel: 0, quad: false, grilleH: 0.55, chromeBump: true, cargo: { u0: 0.275, u1: 1.0, top: 3.95 },
+    cabStart: 0.11, cabEnd: 0.26, roof: 3.0, rakeF: 0.5, rakeR: 0.02, cabW: 0.95, topW: 0.88,
+    bPillar: false, cPanel: 0, quad: false, grilleH: 0.55, chromeBump: true, cargo: { u0: 0.275, u1: 1.0, top: 3.95 }, soft: true, roll: 1.6,
   },
   // ---- modern cars: rounder, wedgier, raked glass, body-colour bumpers, slim lamps ----
   // compact hatchback
@@ -177,7 +177,9 @@ function bodyHalfWidth(st, yy, u) {
   hw *= 1 - 0.07 * Math.pow(1 - yy, 3); // tucked rocker
   hw *= 1 + 0.025 * Math.sin(Math.PI * Math.min(1, yy * 1.15)); // full "fuselage" sides
   hw *= 1 + 0.009 * Math.exp(-(((yy - 0.66) / 0.06) ** 2)); // character line
-  hw *= st.modern ? 1 - 0.13 * Math.pow(e, 3) - 0.08 * Math.pow(e, 8) - 0.05 * Math.pow(yy, 2) : 1 - 0.09 * Math.pow(e, 5) - 0.05 * Math.pow(e, 14); // rounded corners in plan view
+  hw *= st.modern ? 1 - 0.13 * Math.pow(e, 3) - 0.08 * Math.pow(e, 8) - 0.05 * Math.pow(yy, 2)
+    : st.soft ? 1 - 0.06 * Math.pow(e, 6) - 0.07 * Math.pow(e, 16) - 0.03 * Math.pow(yy, 3) // big vehicles: softened corners
+    : 1 - 0.09 * Math.pow(e, 5) - 0.05 * Math.pow(e, 14); // rounded corners in plan view
   if (st.hips) hw *= 1 + st.hips * Math.exp(-(((u - 0.74) / 0.09) ** 2)) * Math.sin(Math.PI * Math.min(1, yy * 1.2)); // coke-bottle rear hips
   return hw;
 }
@@ -203,7 +205,7 @@ function lowerBody(st, spec, scheme, dirt = 0) {
     const Y = bottom + (top - bottom) * yn;
     const hw = bodyHalfWidth(st, yn, u);
     // rounded nose and tail: top edge rolls back, lower valance tucks under
-    const k = st.roll || 1, ex = st.modern ? 6 : 14;
+    const k = st.roll || 1, ex = st.modern ? 6 : st.soft ? 9 : 14;
     const roll = k * ((0.14 * Math.pow(yn, 5) + 0.07 * Math.pow(1 - yn, 3)) * Math.pow(e, ex) + 0.06 * Math.pow(Math.abs(xs), 4) * Math.pow(e, ex + 6));
     const Z = -L / 2 + u * L + (u < 0.5 ? roll : -roll);
     return [xs * hw, Y, Z];
@@ -322,16 +324,43 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     const xs = xn * 2 - 1;
     const p = cabPoint(st, xs, yn, zn, inset);
     p[0] = xs * Math.abs(p[0]) * (1 - 0.08 * Math.pow(Math.abs(xs), 2) * Math.pow(yn, 3));
-    p[1] += (st.modern ? 0.09 : 0.05) * (1 - xs * xs) * Math.pow(yn, 4) - 0.03 * Math.pow(Math.abs(xs), 3) * Math.pow(yn, 6);
-    if (st.modern) p[1] -= 0.06 * Math.pow(Math.abs(2 * zn - 1), 3) * Math.pow(yn, 3); // the roof arcs down front and back
+    p[1] += (st.modern ? 0.09 : st.soft ? 0.1 : 0.05) * (1 - xs * xs) * Math.pow(yn, 4) - (st.soft ? 0.08 : 0.03) * Math.pow(Math.abs(xs), 3) * Math.pow(yn, 6);
+    if (st.modern || st.soft) p[1] -= (st.soft ? 0.12 : 0.06) * Math.pow(Math.abs(2 * zn - 1), st.soft ? 6 : 3) * Math.pow(yn, 3); // the roof arcs down front and back
     return p;
   };
   // bus windows: see-through dark tinted glass (you can see the seats and riders), and they can be smashed out
   const tinted = spec.style === 'bus' || spec.style === 'truck';
   const cabMat = tinted ? (M.busGlass = M.busGlass || new THREE.MeshPhysicalMaterial({ color: 0x101820, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.7, envMapIntensity: 0.8, depthWrite: false, side: THREE.DoubleSide })) : M.glass;
-  const cab = addMesh(model, mapped((xn, yn, zn) => cabRound(xn, yn * 0.9, zn, 0.03), 6, 4, 8), cabMat, deformGeos);
-  cab.receiveShadow = false;
-  if (tinted) cab.renderOrder = 6;
+  const cabGeo = mapped((xn, yn, zn) => cabRound(xn, yn * 0.9, zn, tinted ? 0.03 : 0.03), 6, 4, tinted ? 24 : 8);
+  let cab, panes = null;
+  if (tinted) {
+    // the glass cut into panes (windscreen, rear, and a row down each side) so a knock only breaks the nearby ones
+    const src = cabGeo.index ? cabGeo.toNonIndexed() : cabGeo, P = src.attributes.position, Nn = src.attributes.normal, UV = src.attributes.uv;
+    const nSeg = spec.style === 'bus' ? 8 : 1, z0 = -L / 2 + st.cabStart * L, z1 = -L / 2 + st.cabEnd * L, buckets = new Map();
+    for (let t = 0; t < P.count; t += 3) {
+      let cx = 0, cz = 0, nx = 0, nz = 0, ny = 0;
+      for (let q = t; q < t + 3; q++) { cx += P.getX(q) / 3; cz += P.getZ(q) / 3; nx += Nn.getX(q); ny += Nn.getY(q); nz += Nn.getZ(q); }
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const key = nz / len < -0.6 ? 'F' : nz / len > 0.6 ? 'R' : (cx < 0 ? 'L' : 'S') + Math.min(nSeg - 1, Math.max(0, Math.floor(((cz - z0) / (z1 - z0)) * nSeg)));
+      (buckets.get(key) || buckets.set(key, []).get(key)).push(t);
+    }
+    panes = [];
+    for (const [key, tris] of buckets) {
+      const g = new THREE.BufferGeometry(), pos = [], nor = [], uv = [];
+      let sx = 0, sz = 0;
+      for (const t of tris) for (let q = t; q < t + 3; q++) { pos.push(P.getX(q), P.getY(q), P.getZ(q)); nor.push(Nn.getX(q), Nn.getY(q), Nn.getZ(q)); if (UV) uv.push(UV.getX(q), UV.getY(q)); sx += P.getX(q); sz += P.getZ(q); }
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      if (UV) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      const m = addMesh(model, g, cabMat, deformGeos);
+      m.receiveShadow = false; m.renderOrder = 6;
+      const n = tris.length * 3;
+      panes.push({ mesh: m, x: sx / n, z: sz / n, key });
+    }
+    cab = panes[0].mesh;
+  } else {
+    cab = addMesh(model, cabGeo, cabMat, deformGeos);
+    cab.receiveShadow = false;
+  }
   if (spec.style === 'bus') {
     // rows of seats down both sides, and a floor
     const seatMat = M.busSeat = M.busSeat || new THREE.MeshStandardMaterial({ color: 0x2f4a6a, roughness: 0.8 });
@@ -357,8 +386,8 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   const pillar = (s, u0, u1, inset0 = -0.012, depth = 0.05, mat = paintMat) => {
     const g = mapped((xn, yn, zn) => {
       const u = u0 + (u1 - u0) * zn, p = cabPoint(st, s, yn, u, inset0 + xn * depth);
-      p[1] -= 0.03 * Math.pow(yn, 6); // the roof's rounded edge
-      if (st.modern) p[1] -= 0.06 * Math.pow(Math.abs(2 * u - 1), 3) * Math.pow(yn, 3); // and its arc down front and back
+      p[1] -= (st.soft ? 0.08 : 0.03) * Math.pow(yn, 6); // the roof's rounded edge
+      if (st.modern || st.soft) p[1] -= (st.soft ? 0.12 : 0.06) * Math.pow(Math.abs(2 * u - 1), st.soft ? 6 : 3) * Math.pow(yn, 3); // and its arc down front and back
       return p;
     }, 1, 2, 2, () => (scheme === 'police' ? [0.02, 0.02, 0.025] : scheme === 'bus' ? [0.1, 0.32, 0.2] : WHITE));
     const m = addMesh(model, g, mat, deformGeos);
@@ -377,9 +406,11 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
     // cargo box behind the cab
     const c = st.cargo;
     const g = mapped((xn, yn, zn) => {
-      const u = c.u0 + (c.u1 - c.u0) * zn;
-      return [(xn * 2 - 1) * (W / 2) * 0.995, st.belt - 0.15 + (c.top - st.belt + 0.15) * yn, -L / 2 + u * L];
-    }, 1, 1, 1);
+      const u = c.u0 + (c.u1 - c.u0) * zn, xs = xn * 2 - 1, ez = Math.abs(2 * zn - 1);
+      // rounded top edges and corners rather than a raw box
+      const edge = st.soft ? Math.pow(Math.abs(xs), 8) * Math.pow(yn, 8) : 0, corner = st.soft ? Math.pow(ez, 10) * Math.pow(Math.abs(xs), 6) : 0;
+      return [xs * (W / 2) * 0.995 * (1 - 0.05 * edge - 0.04 * corner), st.belt - 0.15 + (c.top - st.belt + 0.15) * yn - 0.12 * edge - 0.08 * Math.pow(ez, 10) * Math.pow(yn, 8), -L / 2 + u * L - (zn < 0.5 ? -1 : 1) * 0.06 * corner];
+    }, st.soft ? 10 : 1, st.soft ? 8 : 1, st.soft ? 10 : 1);
     const cargoMat = scheme === 'ambulance' || scheme === 'fire' ? paintMat : softSpot(new THREE.MeshStandardMaterial({ color: [0xe8e4da, 0xd8c9a0, 0xc8d4dc][Math.floor(Math.random() * 3)], roughness: 0.6 }));
     addMesh(model, g, cargoMat, deformGeos);
     // ribs and rear door seam
@@ -695,7 +726,7 @@ export function buildCar(spec, colorHex, scheme = 'plain') {
   };
   // the cab may carry extra child pieces (none); remember its intact glass
   const parts = { bumperF, bumperR, caps, glass: cab.material };
-  return { breakGlass: tinted, paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
+  return { breakGlass: tinted, panes, paintHex: colorHex, root, model, body, cab, roof, wheels, tailMat, heads, tails, lightbar, beam, beams, deform, style: st, paintMeshes, parts, indicators };
 }
 
 let beamMat = null;
@@ -810,6 +841,7 @@ export function repairCar(car) {
   if (car.parts) {
     car.cab.material = car.parts.glass;
     car.cab.visible = true; // (smashed bus and truck windows come back with the vehicle)
+    if (car.panes) for (const p of car.panes) p.mesh.visible = true;
     car.parts.bumperF.visible = car.parts.bumperR.visible = true;
     for (const c of car.parts.caps) c.visible = true;
   }

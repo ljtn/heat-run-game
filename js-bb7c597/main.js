@@ -577,13 +577,20 @@ class Game {
       if (isP) deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.5, (dv - 1.5) * (this._treeHit ? 0.06 : 0.04)));
       else deformCar(v.car, mx, my, mz, _w.x, _w.y, _w.z, Math.min(0.85, (dv - 0.8) * 0.085), { R: 1.55, maxOff: 0.8, buckle: 0.55, scuff: 7 });
       // a hard knock shatters a bus's or truck's windows: a shower of glass and the frames left open
-      if (v.car.breakGlass && v.car.cab.visible && impact > 7) { // (closing speed: a bus hardly budges when you hit it)
-        v.car.cab.visible = false;
-        for (let k = 0; k < 26; k++) {
+      if (v.car.panes && impact > 7) { // (closing speed: a bus hardly budges when you hit it)
+        // only the panes near the impact (on that side, within a few metres) give way
+        let broke = 0;
+        const reach = 1.2 + Math.min(1.6, (impact - 7) * 0.12);
+        for (const p of v.car.panes) {
+          if (!p.mesh.visible) continue;
+          const sameSide = p.key === 'F' || p.key === 'R' || Math.sign(p.x) === Math.sign(mx) || Math.abs(mx) < 0.4;
+          if (sameSide && Math.hypot(p.x - mx, p.z - mz) < reach + (p.key === 'F' || p.key === 'R' ? 0.4 : 0)) { p.mesh.visible = false; broke++; }
+        }
+        for (let k = 0; k < (broke ? 10 + broke * 8 : 0); k++) {
           const s2 = 0.1 + Math.random() * 0.22;
           this.props.debris.spawn(px + (Math.random() - 0.5) * 2, v.pos.y + 0.8 + Math.random() * 1.2, pz + (Math.random() - 0.5) * 2, v.vel.x * 0.4 + nx * (2 + Math.random() * 3), 1 + Math.random() * 3, v.vel.z * 0.4 + nz * (2 + Math.random() * 3), s2, 0.02, s2, 0xbfd6e2);
         }
-        this.audio.glass && this.audio.glass();
+        if (broke && this.audio.glass) this.audio.glass();
       }
       for (const part of breakCarParts(v.car, isP ? v.damage : Math.min(1, v.damage * 1.6 + 0.1), mz, v.hz, isP ? dv : dv * 1.4)) {
         // the detached piece tumbles away as debris
